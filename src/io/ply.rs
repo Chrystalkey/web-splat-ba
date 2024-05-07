@@ -60,6 +60,10 @@ impl<R: io::Read + io::Seek> PlyReader<R> {
         let mut _normals = [0.; 3];
         self.reader.read_f32_into::<B>(&mut _normals)?;
 
+        // "spherical harmonics" coefficients, 16 groups of three floats, first three are f_dc_*, the others are
+        // f_rest_*
+        // first three are read into sh[0][0..3], rest of sh is empty (=0)
+        // other are read into rest
         let mut sh: [[f32; 3]; 16] = [[0.; 3]; 16];
         self.reader.read_f32_into::<B>(&mut sh[0])?;
         let mut sh_rest = [0.; 15 * 3];
