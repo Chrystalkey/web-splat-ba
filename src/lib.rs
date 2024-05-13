@@ -48,7 +48,7 @@ mod renderer;
 pub use renderer::{GaussianRenderer, SplattingArgs};
 
 mod scene;
-use crate::utils::GPUStopwatch;
+use crate::{renderer::TemporalSmoothing, utils::GPUStopwatch};
 
 pub use self::scene::{Scene, SceneCamera, Split};
 
@@ -152,6 +152,7 @@ pub struct WindowContext {
     #[cfg(not(target_arch = "wasm32"))]
     history: RingBuffer<(Duration, Duration, Duration)>,
     display: Display,
+    temp_smoother: TemporalSmoothing,
 
     background_color: egui::Color32,
 
@@ -252,6 +253,10 @@ impl WindowContext {
             size.width,
             size.height,
         );
+        let temp_smoother : TemporalSmoothing = TemporalSmoothing::new(device, 
+            render_format,
+             render_format,
+              size.width, size.height);
 
 
         let stopwatch = if cfg!(not(target_arch = "wasm32")) {
@@ -289,6 +294,7 @@ impl WindowContext {
             history: RingBuffer::new(512),
             ui_visible: true,
             display,
+            temp_smoother,
             background_color: Color32::BLACK,
             saved_cameras: Vec::new(),
             #[cfg(feature = "video")]
@@ -329,6 +335,8 @@ impl WindowContext {
             self.surface
                 .configure(&self.wgpu_context.device, &self.config);
             self.display
+                .resize(&self.wgpu_context.device, new_size.width, new_size.height);
+            self.temp_smoother
                 .resize(&self.wgpu_context.device, new_size.width, new_size.height);
             self.splatting_args
                 .camera
@@ -442,7 +450,8 @@ impl WindowContext {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: self.display.texture(),
+                    // TODO: change to temp smoothing pass's input texture
+                    view: self.temp_smoother.texture(),
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -456,11 +465,17 @@ impl WindowContext {
                 })],
                 ..Default::default()
             });
+
             self.renderer.render(&mut render_pass, &self.pc);
+
         }
         if let Some(stopwatch) = &mut self.stopwatch {
             stopwatch.stop(&mut encoder, "rasterization").unwrap();
         }
+        // add render pass for temporal smoothing
+        // TODO: add render() function to TemporalSmoothing
+        self.temp_smoother.render(&mut encoder,
+        self.display.texture(),self.renderer.camera());
 
         self.display.render(
             &mut encoder,
