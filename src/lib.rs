@@ -225,7 +225,7 @@ impl WindowContext {
         log::info!("loaded point cloud with {:} points", pc.num_points());
 
         let renderer =
-            GaussianRenderer::new(&device, &queue, render_format, pc.sh_deg(), pc.compressed())
+            GaussianRenderer::new(&device, &queue, TemporalSmoothing::OUT_TEXTURE_FORMAT, pc.sh_deg(), pc.compressed())
                 .await;
 
         let aabb = pc.bbox();
@@ -248,14 +248,12 @@ impl WindowContext {
 
         let display = Display::new(
             device,
-            render_format,
             surface_format.remove_srgb_suffix(),
             size.width,
             size.height,
         );
         let temp_smoother : TemporalSmoothing = TemporalSmoothing::new(device, 
-            render_format,
-             render_format,
+             display.texture(),
               size.width, size.height);
 
 
@@ -337,7 +335,8 @@ impl WindowContext {
             self.display
                 .resize(&self.wgpu_context.device, new_size.width, new_size.height);
             self.temp_smoother
-                .resize(&self.wgpu_context.device, new_size.width, new_size.height);
+                .resize(&self.wgpu_context.device, new_size.width, new_size.height,
+                self.display.texture());
             self.splatting_args
                 .camera
                 .projection
@@ -447,10 +446,14 @@ impl WindowContext {
             stopwatch.start(&mut encoder, "rasterization").unwrap();
         }
         if redraw {
+            // swap textures & recreate bind groups on both sides
+            self.temp_smoother.swap_framebuffers(&mut self.display.texture_mut());
+            self.display.rewrite_bind_group(&self.wgpu_context.device);
+            self.temp_smoother.rewrite_bind_group(&self.wgpu_context.device, self.display.texture());
+
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    // TODO: change to temp smoothing pass's input texture
                     view: self.temp_smoother.texture(),
                     resolve_target: None,
                     ops: wgpu::Operations {
@@ -472,10 +475,8 @@ impl WindowContext {
         if let Some(stopwatch) = &mut self.stopwatch {
             stopwatch.stop(&mut encoder, "rasterization").unwrap();
         }
-        // add render pass for temporal smoothing
-        // TODO: add render() function to TemporalSmoothing
-        self.temp_smoother.render(&mut encoder,
-        self.display.texture(),self.renderer.camera());
+        // has no texture passed as input, because the textures are swapped in between render passes below
+        self.temp_smoother.render(&mut encoder, self.renderer.camera());
 
         self.display.render(
             &mut encoder,
@@ -724,7 +725,7 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
     state.pointcloud_file_path = pointcloud_file_path;
 
     if let Some(scene) = scene {
-        let init_camera = scene.cameras(None)[0].clone();
+        let _init_camera = scene.cameras(None)[0].clone();
         state.set_scene(scene);
         state.set_scene_camera(0);
         state.scene_file_path = scene_file_path;

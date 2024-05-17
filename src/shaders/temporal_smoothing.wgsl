@@ -8,42 +8,32 @@ struct CameraUniforms {
     focal: vec2<f32>
 };
 
-struct FrameInformation{
+struct FrameInformation {
     view: mat4x4<f32>,
     proj: mat4x4<f32>,
 }
 
-struct VertexOut{
+struct VertexOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) tex_coord: vec2<f32>,
 };
 
-@group(0) @binding(0) 
-var<uniform> camera: CameraUniforms;
-@group(1) @binding(0) 
-var prevFrameTexture: texture_2d<f32>;
-@group(1) @binding(1) 
-var prevFrameSampler: sampler;
+@group(0) @binding(0) var<uniform> camera: CameraUniforms;
 
-@vertex
-fn vs_main(
-    @builtin(vertex_index) in_vertex_index: u32,
-) -> VertexOut {
+@group(1) @binding(0) var frameSampler: sampler;
+@group(1) @binding(1) var currentFrameTexture: texture_2d<f32>;
 
-    // creates two vertices that cover the whole screen
-    let xy = vec2<f32>(
-        f32(in_vertex_index % 2u == 0u),
-        f32(in_vertex_index < 2u)
-    );
-    return VertexOut(vec4<f32>(xy * 2. - (1.), 0., 1.), vec2<f32>(xy.x, 1. - xy.y));
-}
+@group(1) @binding(2) var accuTexture: texture_storage_2d<rgba16float, read_write>;
 
-@fragment
-fn fs_main(vertex_in: VertexOut) -> @location(0) vec4<f32> {
-    let color = textureSample(
-                    prevFrameTexture, 
-                    prevFrameSampler, 
-                    vertex_in.tex_coord
-                    );
-    return color;
+@group(1) @binding(3) var dstTexture: texture_storage_2d<rgba16float, read_write>;
+
+@compute @workgroup_size(1)
+fn cs_main(@builtin(global_invocation_id) id: vec3u){
+    let tex_dims = textureDimensions(currentFrameTexture); // assumes all texture have the same dimensions
+    let position = id.xy;
+    let current_colour = textureLoad(currentFrameTexture, position, 0);
+    let accu_colour = textureLoad(accuTexture, position);
+    let final_colour = (current_colour + accu_colour)/2;
+    // write the texture points into the receiving buffer
+    textureStore(dstTexture, position, final_colour);
 }
