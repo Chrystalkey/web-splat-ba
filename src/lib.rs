@@ -150,7 +150,7 @@ pub struct WindowContext {
     ui_visible: bool,
 
     #[cfg(not(target_arch = "wasm32"))]
-    history: RingBuffer<(Duration, Duration, Duration)>,
+    history: RingBuffer<(Duration, Duration, Duration, Duration)>,
     display: Display,
     temp_smoother: TemporalSmoothing,
 
@@ -257,7 +257,7 @@ impl WindowContext {
 
 
         let stopwatch = if cfg!(not(target_arch = "wasm32")) {
-            Some(GPUStopwatch::new(device, Some(3)))
+            Some(GPUStopwatch::new(device, Some(4)))
         } else {
             None
         };
@@ -481,9 +481,13 @@ impl WindowContext {
         }
         if let Some(stopwatch) = &mut self.stopwatch {
             stopwatch.stop(&mut encoder, "rasterization").unwrap();
+            stopwatch.start(&mut encoder, "smoothing").unwrap();
         }
         // has no texture passed as input, because the textures are swapped in between render passes above  
         self.temp_smoother.render(&mut encoder, self.renderer.camera());
+        if let Some(stopwatch) = &mut self.stopwatch {
+            stopwatch.stop(&mut encoder, "smoothing").unwrap();
+        }
 
         self.display.render(
             &mut encoder,

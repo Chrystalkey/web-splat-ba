@@ -25,6 +25,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
             *durations.get("preprocess").unwrap_or(&Duration::ZERO),
             *durations.get("sorting").unwrap_or(&Duration::ZERO),
             *durations.get("rasterization").unwrap_or(&Duration::ZERO),
+            *durations.get("smoothing").unwrap_or(&Duration::ZERO),
         ));
     }
 
@@ -56,6 +57,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
             let pre: Vec<f32> = history.iter().map(|v| v.0.as_secs_f32() * 1000.).collect();
             let sort: Vec<f32> = history.iter().map(|v| v.1.as_secs_f32() * 1000.).collect();
             let rast: Vec<f32> = history.iter().map(|v| v.2.as_secs_f32() * 1000.).collect();
+            let smooth: Vec<f32> = history.iter().map(|v| v.3.as_secs_f32() * 1000.).collect();
 
             ui.label("Frame times (ms):");
             egui_plot::Plot::new("frame times")
@@ -81,6 +83,9 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     ui.line(line);
                     let line =
                         egui_plot::Line::new(PlotPoints::from_ys_f32(&rast)).name("rasterize");
+                    ui.line(line);
+                    let line = 
+                        egui_plot::Line::new(PlotPoints::from_ys_f32(&smooth)).name("smoothing");
                     ui.line(line);
                 });
         });
