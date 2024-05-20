@@ -202,8 +202,6 @@ impl WindowContext {
             .unwrap_or(&surface_caps.formats[0])
             .clone();
 
-        let render_format = if render_config.hdr{ wgpu::TextureFormat::Rgba16Float}else{wgpu::TextureFormat::Rgba8Unorm};
-
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
@@ -225,7 +223,7 @@ impl WindowContext {
         log::info!("loaded point cloud with {:} points", pc.num_points());
 
         let renderer =
-            GaussianRenderer::new(&device, &queue, TemporalSmoothing::OUT_TEXTURE_FORMAT, pc.sh_deg(), pc.compressed())
+            GaussianRenderer::new(&device, &queue, TemporalSmoothing::OUT_TEXTURE_FORMAT_COL, pc.sh_deg(), pc.compressed())
                 .await;
 
         let aabb = pc.bbox();
@@ -254,6 +252,7 @@ impl WindowContext {
         );
         let temp_smoother : TemporalSmoothing = TemporalSmoothing::new(device, 
              display.texture(),
+             display.depth_texture(),
               size.width, size.height);
 
 
@@ -336,7 +335,7 @@ impl WindowContext {
                 .resize(&self.wgpu_context.device, new_size.width, new_size.height);
             self.temp_smoother
                 .resize(&self.wgpu_context.device, new_size.width, new_size.height,
-                self.display.texture());
+                self.display.texture(), &self.display.depth_texture());
             self.splatting_args
                 .camera
                 .projection
@@ -447,9 +446,9 @@ impl WindowContext {
         }
         if redraw {
             // swap textures & recreate bind groups on both sides
-            self.temp_smoother.swap_framebuffers(&mut self.display.texture_mut());
+            self.temp_smoother.swap_framebuffers(&mut self.display);
             self.display.rewrite_bind_group(&self.wgpu_context.device);
-            self.temp_smoother.rewrite_bind_group(&self.wgpu_context.device, self.display.texture());
+            self.temp_smoother.rewrite_bind_group(&self.wgpu_context.device, self.display.texture(), self.display.depth_texture());
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render pass"),
@@ -466,6 +465,14 @@ impl WindowContext {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: self.temp_smoother.depth_texture(),
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 ..Default::default()
             });
 
@@ -475,7 +482,7 @@ impl WindowContext {
         if let Some(stopwatch) = &mut self.stopwatch {
             stopwatch.stop(&mut encoder, "rasterization").unwrap();
         }
-        // has no texture passed as input, because the textures are swapped in between render passes below
+        // has no texture passed as input, because the textures are swapped in between render passes above  
         self.temp_smoother.render(&mut encoder, self.renderer.camera());
 
         self.display.render(

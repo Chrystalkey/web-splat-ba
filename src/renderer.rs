@@ -11,8 +11,6 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::time::Duration;
 
-use egui::output;
-use rand::distributions::Uniform;
 use wgpu::{include_wgsl, Extent3d, MultisampleState};
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector4};
@@ -66,7 +64,7 @@ impl GaussianRenderer {
                     format: color_format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
-                })],
+                })]
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -77,7 +75,15 @@ impl GaussianRenderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: Some(
+                wgpu::DepthStencilState {
+                    format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }
+            ),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -412,22 +418,6 @@ impl PreprocessPipeline {
     }
 }
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct FrameInformation {
-    // view and projection matrix from the previous frame
-    view_mat: Matrix4<f32>,
-    proj_mat: Matrix4<f32>,
-}
-impl Default for FrameInformation {
-    fn default() -> Self {
-        Self {
-            view_mat: Matrix4::identity(),
-            proj_mat: Matrix4::identity(),
-        }
-    }
-}
-
 /// Contains everything for the temporal smoothing in-between pass. The pass starts by taking the
 /// currently rendered frame without post-processing, smoothing over pixels with data from
 /// previous frames and outputting it to the display texture for further processing
@@ -439,15 +429,25 @@ pub struct TemporalSmoothing {
     extent: wgpu::Extent3d,
     // frame buffer for the accumulation buffer
     accu_frame: wgpu::TextureView,
-    accu_transform: UniformBuffer<FrameInformation>,
+    accu_depth: wgpu::TextureView,
+    accu_trafo_uniform: UniformBuffer<CameraUniform>,
 
-    // frame buffer and bind group for the frame just finished by the main render pass
+    // frame buffer for the frame just finished by the main render pass and Depth Texture
     current_frame: wgpu::TextureView,
+    current_depth: wgpu::TextureView,
 }
 
 impl TemporalSmoothing {
+
+    pub const OUT_TEXTURE_FORMAT_COL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+    pub const OUT_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
+    pub const IN_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
     pub fn texture(&self) -> &wgpu::TextureView {
         &self.current_frame
+    }
+    pub fn depth_texture(&self) -> &wgpu::TextureView {
+        &self.current_depth
     }
     fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -471,24 +471,57 @@ impl TemporalSmoothing {
                     },
                     count: None,
                 },
-                // accumulator frame
+                // current frame's depth texture
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // accumulator frame
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::ReadWrite,
-                        format: TemporalSmoothing::OUT_TEXTURE_FORMAT,
+                        format: TemporalSmoothing::OUT_TEXTURE_FORMAT_COL,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // accumulator frame depth map
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::ReadWrite,
+                        format: TemporalSmoothing::OUT_TEXTURE_FORMAT_DEP,
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                     count: None,
                 },
                 // dst frame, output texture
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 5,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::ReadWrite,
-                        format: TemporalSmoothing::OUT_TEXTURE_FORMAT,
+                        format: TemporalSmoothing::OUT_TEXTURE_FORMAT_COL,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
+                // dst frame depth map
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::ReadWrite,
+                        format: TemporalSmoothing::OUT_TEXTURE_FORMAT_DEP,
                         view_dimension: wgpu::TextureViewDimension::D2,
                     },
                     count: None,
@@ -500,6 +533,7 @@ impl TemporalSmoothing {
     pub fn new(
         device: &wgpu::Device,
         output_texture: &wgpu::TextureView,
+        output_depth: &wgpu::TextureView,
         width: u32,
         height: u32,
     ) -> Self {
@@ -508,6 +542,7 @@ impl TemporalSmoothing {
             bind_group_layouts: &[
                 &UniformBuffer::<CameraUniform>::bind_group_layout(device),
                 &Self::bind_group_layout(device),
+                &UniformBuffer::<CameraUniform>::bind_group_layout(device),
             ],
             push_constant_ranges: &[],
         });
@@ -519,8 +554,8 @@ impl TemporalSmoothing {
             module: &shader,
             entry_point: "cs_main",
         });
-        let (accu_frame, current_frame, sampler, bind_group) =
-            Self::create_render_target(device, width, height, output_texture);
+        let ( sampler, current_frame, current_depth,accu_frame, accu_depth, bind_group) =
+            Self::create_render_target(device, width, height, output_texture, output_depth);
 
         Self {
             pipeline,
@@ -530,25 +565,34 @@ impl TemporalSmoothing {
                 height,
                 depth_or_array_layers: 1,
             },
-            current_frame,
-            accu_frame,
             sampler,
-            accu_transform: UniformBuffer::new_default(device, Some("frame information")),
+            current_frame,
+            current_depth,
+            accu_frame,
+            accu_depth,
+            accu_trafo_uniform: UniformBuffer::new_default(device, Some("accu frame trafo")),
         }
     }
-    
-    pub const OUT_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
     fn create_render_target(
         device: &wgpu::Device,
         width: u32,
         height: u32,
         output_texture: &wgpu::TextureView,
+        output_depth: &wgpu::TextureView,
     ) -> (
-        wgpu::TextureView,
-        wgpu::TextureView,
         wgpu::Sampler,
+        wgpu::TextureView,
+        wgpu::TextureView,
+        wgpu::TextureView,
+        wgpu::TextureView,
         wgpu::BindGroup,
     ) {
+        let extent = Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
@@ -556,71 +600,108 @@ impl TemporalSmoothing {
         });
         let current_frame = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("currently rendered image"),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
+            size: extent.clone(),
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: Self::OUT_TEXTURE_FORMAT,
+            format: Self::OUT_TEXTURE_FORMAT_COL,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
         let cf_view = current_frame.create_view(&Default::default());
-        let accu_frame = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("accumulator frame"),
-            size: Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
+        let current_depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("currently rendered depth image"),
+            size: extent.clone(),
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format : Self::OUT_TEXTURE_FORMAT,
+            format: Self::IN_TEXTURE_FORMAT_DEP,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let cfd_view = current_depth.create_view(&Default::default());
+
+        let accu_frame = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("accumulator frame"),
+            size: extent.clone(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::OUT_TEXTURE_FORMAT_COL,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING,
             view_formats: &[],
         });
         let ac_view = accu_frame.create_view(&Default::default());
 
-        let bind_group = Self::build_bind_group(
-            device, 
-            &sampler, 
-            &cf_view, 
-            &ac_view, 
-            output_texture);
-        return (cf_view, ac_view, sampler, bind_group);
+        let accu_depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("accumulator depth frame"),
+            size: extent.clone(),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::OUT_TEXTURE_FORMAT_DEP,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let acd_view = accu_depth.create_view(&Default::default());
+
+        let bind_group =
+            Self::build_bind_group(device, &sampler, &cf_view, &cfd_view, &ac_view, &acd_view, output_texture, output_depth);
+        return (sampler, cf_view, cfd_view, ac_view, acd_view, bind_group);
     }
 
     pub fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        camera: &UniformBuffer<CameraUniform>,
+        camera_uniform: &UniformBuffer<CameraUniform>,
     ) {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Temporal Smoothing Compute Pass"),
             ..Default::default()
         });
-        compute_pass.set_bind_group(0, camera.bind_group(), &[]);
+        compute_pass.set_bind_group(0, camera_uniform.bind_group(), &[]);
         compute_pass.set_bind_group(1, &self.bind_group, &[]);
+        compute_pass.set_bind_group(2, self.accu_trafo_uniform.bind_group(), &[]);
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.dispatch_workgroups(self.extent.width, self.extent.height, 1);
+
+        // camera updates from raw data
+        todo!("copy camera data to temporary uniform buffer")
     }
 
-    pub fn swap_framebuffers(&mut self, display_input_texture: &mut wgpu::TextureView) {
-        std::mem::swap(display_input_texture, &mut self.accu_frame);
+    pub fn swap_framebuffers(&mut self, display: &mut Display) {
+        std::mem::swap(display.texture_mut(), &mut self.accu_frame);
+        std::mem::swap(display.depth_texture_mut(), &mut self.accu_depth);
     }
 
-    pub fn rewrite_bind_group(&mut self, device: &wgpu::Device, output_texture: &wgpu::TextureView) {
-        self.bind_group = Self::build_bind_group(device, 
-            &self.sampler, 
-            &self.current_frame, 
-            &self.accu_frame, output_texture);
+    pub fn rewrite_bind_group(
+        &mut self,
+        device: &wgpu::Device,
+        output_texture: &wgpu::TextureView,
+        output_depth: &wgpu::TextureView,
+    ) {
+        self.bind_group = Self::build_bind_group(
+            device,
+            &self.sampler,
+            &self.current_frame,
+            &self.current_depth,
+            &self.accu_frame,
+            &self.accu_depth,
+            output_texture,
+            output_depth
+        );
     }
 
-    fn build_bind_group(device: &wgpu::Device, sampler: &wgpu::Sampler, current_frame: &wgpu::TextureView, accu_frame: &wgpu::TextureView, output_texture: &wgpu::TextureView) -> wgpu::BindGroup {
+    fn build_bind_group(
+        device: &wgpu::Device,
+        sampler: &wgpu::Sampler,
+        current_frame: &wgpu::TextureView,
+        current_depth: &wgpu::TextureView,
+        accu_frame: &wgpu::TextureView,
+        accu_depth: &wgpu::TextureView,
+        output_texture: &wgpu::TextureView,
+        output_depth: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("render target bind group of tempsmooth"),
             layout: &Self::bind_group_layout(device),
@@ -635,11 +716,23 @@ impl TemporalSmoothing {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(accu_frame),
+                    resource: wgpu::BindingResource::TextureView(current_depth),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
+                    resource: wgpu::BindingResource::TextureView(accu_frame),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(accu_depth),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
                     resource: wgpu::BindingResource::TextureView(output_texture),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(output_depth),
                 },
             ],
         })
@@ -651,13 +744,16 @@ impl TemporalSmoothing {
         width: u32,
         height: u32,
         output_texture: &wgpu::TextureView,
+        output_depth: &wgpu::TextureView,
     ) {
-        let (current, accu, sampler, bind_group) =
-            Self::create_render_target(device, width, height, output_texture);
+        let (sampler, c, cd, a, ad, bind_group) =
+            Self::create_render_target(device, width, height, output_texture, output_depth);
         self.bind_group = bind_group;
         self.sampler = sampler;
-        self.accu_frame = accu;
-        self.current_frame = current;
+        self.accu_frame = a;
+        self.accu_depth = ad;
+        self.current_frame = c;
+        self.current_depth = cd;
         self.extent = Extent3d {
             width,
             height,
@@ -669,8 +765,9 @@ impl TemporalSmoothing {
 pub struct Display {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
-    format: wgpu::TextureFormat,
     view: wgpu::TextureView,
+    depth_view: wgpu::TextureView,
+
     sampler: wgpu::Sampler,
     env_bg: wgpu::BindGroup,
     has_env_map: bool,
@@ -720,13 +817,16 @@ impl Display {
             multiview: None,
         });
         let env_bg = Self::create_env_map_bg(device, None);
-        let (view, sampler, bind_group) =
-            Self::create_render_target(device, TemporalSmoothing::OUT_TEXTURE_FORMAT, width, height);
+        let (view, depth_view, sampler, bind_group) = Self::create_render_target(
+            device,
+            width,
+            height,
+        );
         Self {
             pipeline,
             view,
+            depth_view,
             sampler,
-            format: TemporalSmoothing::OUT_TEXTURE_FORMAT,
             bind_group,
             env_bg,
             has_env_map: false,
@@ -738,6 +838,13 @@ impl Display {
     }
     pub fn texture_mut(&mut self) -> &mut wgpu::TextureView {
         &mut self.view
+    }
+
+    pub fn depth_texture(&self) -> &wgpu::TextureView {
+        &self.depth_view
+    }
+    pub fn depth_texture_mut(&mut self) -> &mut wgpu::TextureView {
+        &mut self.depth_view
     }
 
     fn env_map_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -818,10 +925,9 @@ impl Display {
 
     fn create_render_target(
         device: &wgpu::Device,
-        format: wgpu::TextureFormat,
         width: u32,
         height: u32,
-    ) -> (wgpu::TextureView, wgpu::Sampler, wgpu::BindGroup) {
+    ) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Sampler, wgpu::BindGroup) {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("display render image"),
             size: Extent3d {
@@ -832,13 +938,33 @@ impl Display {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: TemporalSmoothing::OUT_TEXTURE_FORMAT,
+            format: TemporalSmoothing::OUT_TEXTURE_FORMAT_COL,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::STORAGE_BINDING, // storage binding because tempsmoother needs it
             view_formats: &[],
         });
         let texture_view = texture.create_view(&Default::default());
+
+        let depth_tex = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("display render depth"),
+            size: Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TemporalSmoothing::OUT_TEXTURE_FORMAT_DEP,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::STORAGE_BINDING, // storage binding because tempsmoother needs it
+            view_formats: &[],
+        });
+        let dt_view = depth_tex.create_view(&Default::default());
+
+
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
@@ -858,7 +984,7 @@ impl Display {
                 },
             ],
         });
-        return (texture_view, sampler, bind_group);
+        return (texture_view, dt_view, sampler, bind_group);
     }
 
     pub fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -903,10 +1029,11 @@ impl Display {
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        let (view, sampler, bind_group) =
-            Self::create_render_target(device, self.format, width, height);
+        let (view, dt_view, sampler, bind_group) =
+            Self::create_render_target(device, width, height);
         self.bind_group = bind_group;
         self.view = view;
+        self.depth_view = dt_view;
         self.sampler = sampler;
     }
 
