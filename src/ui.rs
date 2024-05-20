@@ -122,6 +122,13 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     )
                 });
                 ui.end_row();
+                ui.label("Current Frame Colour Weight");
+                ui.add_enabled(true,
+                    egui::DragValue::new(&mut state.splatting_args.current_colour_weight)
+                        .clamp_range(0.0..=1.0)
+                        .speed(0.002),
+                );
+                ui.end_row();
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     ui.label("Dilation Kernel Size");

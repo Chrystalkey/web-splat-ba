@@ -102,6 +102,7 @@ struct RenderSettings {
     kernel_size: f32,
     walltime: f32,
     scene_extend: f32,
+    current_colour_weight: f32,
     center: vec3<f32>,
 }
 

@@ -64,7 +64,7 @@ impl GaussianRenderer {
                     format: color_format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
-                })]
+                })],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -75,15 +75,13 @@ impl GaussianRenderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: Some(
-                wgpu::DepthStencilState {
-                    format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Always,
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }
-            ),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -418,6 +416,20 @@ impl PreprocessPipeline {
     }
 }
 
+
+#[repr(C)]
+#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct MatrixWrapper {
+    matrix: Matrix4<f32>,
+}
+impl Default for MatrixWrapper{
+    fn default() -> Self {
+        Self {
+            matrix: Matrix4::identity(),
+        }
+    }
+
+}
 /// Contains everything for the temporal smoothing in-between pass. The pass starts by taking the
 /// currently rendered frame without post-processing, smoothing over pixels with data from
 /// previous frames and outputting it to the display texture for further processing
@@ -429,7 +441,7 @@ pub struct TemporalSmoothing {
     // frame buffer for the accumulation buffer
     accu_frame: wgpu::TextureView,
     accu_depth: wgpu::TextureView,
-    accu_trafo_uniform: UniformBuffer<CameraUniform>,
+    accu_frame_transformation: UniformBuffer<MatrixWrapper>,
 
     // frame buffer for the frame just finished by the main render pass and Depth Texture
     current_frame: wgpu::TextureView,
@@ -437,11 +449,11 @@ pub struct TemporalSmoothing {
 }
 
 impl TemporalSmoothing {
-
     pub const OUT_TEXTURE_FORMAT_COL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
     pub const OUT_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
     pub const IN_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
     pub const PIXELS_PER_COMPUTE_AXIS: u32 = 4;
+    pub const CURRENT_COLOUR_WEIGHT: f32 = 0.1;
 
     pub fn texture(&self) -> &wgpu::TextureView {
         &self.current_frame
@@ -519,6 +531,17 @@ impl TemporalSmoothing {
                     },
                     count: None,
                 },
+                // previous frame transformation
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         })
     }
@@ -535,7 +558,7 @@ impl TemporalSmoothing {
             bind_group_layouts: &[
                 &UniformBuffer::<CameraUniform>::bind_group_layout(device),
                 &Self::bind_group_layout(device),
-                &UniformBuffer::<CameraUniform>::bind_group_layout(device),
+                &UniformBuffer::<SplattingArgsUniform>::bind_group_layout(device),
             ],
             push_constant_ranges: &[],
         });
@@ -547,8 +570,9 @@ impl TemporalSmoothing {
             module: &shader,
             entry_point: "cs_main",
         });
-        let ( current_frame, current_depth,accu_frame, accu_depth, bind_group) =
-            Self::create_render_target(device, width, height, output_texture, output_depth);
+        let trafo_uniform = UniformBuffer::new_default(device, Some("accu frame transformation"));
+        let (current_frame, current_depth, accu_frame, accu_depth, bind_group) =
+            Self::create_render_target(device, width, height, output_texture, output_depth, &trafo_uniform);
 
         Self {
             pipeline,
@@ -562,7 +586,7 @@ impl TemporalSmoothing {
             current_depth,
             accu_frame,
             accu_depth,
-            accu_trafo_uniform: UniformBuffer::new_default(device, Some("accu frame trafo")),
+            accu_frame_transformation: trafo_uniform,
         }
     }
 
@@ -572,6 +596,7 @@ impl TemporalSmoothing {
         height: u32,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
+        accu_trafo: &UniformBuffer<MatrixWrapper>,
     ) -> (
         wgpu::TextureView,
         wgpu::TextureView,
@@ -626,13 +651,23 @@ impl TemporalSmoothing {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: Self::OUT_TEXTURE_FORMAT_DEP,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::STORAGE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::STORAGE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
         let acd_view = accu_depth.create_view(&Default::default());
 
-        let bind_group =
-            Self::build_bind_group(device, &cf_view, &cfd_view, &ac_view, &acd_view, output_texture, output_depth);
+        let bind_group = Self::build_bind_group(
+            device,
+            &cf_view,
+            &cfd_view,
+            &ac_view,
+            &acd_view,
+            output_texture,
+            output_depth,
+            accu_trafo,
+        );
         return (cf_view, cfd_view, ac_view, acd_view, bind_group);
     }
 
@@ -640,6 +675,7 @@ impl TemporalSmoothing {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         camera_uniform: &UniformBuffer<CameraUniform>,
+        render_settings: &UniformBuffer<SplattingArgsUniform>,
     ) {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("Temporal Smoothing Compute Pass"),
@@ -647,9 +683,13 @@ impl TemporalSmoothing {
         });
         compute_pass.set_bind_group(0, camera_uniform.bind_group(), &[]);
         compute_pass.set_bind_group(1, &self.bind_group, &[]);
-        compute_pass.set_bind_group(2, self.accu_trafo_uniform.bind_group(), &[]);
+        compute_pass.set_bind_group(2, render_settings.bind_group(), &[]);
         compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.dispatch_workgroups(self.extent.width/Self::PIXELS_PER_COMPUTE_AXIS +1, self.extent.height/Self::PIXELS_PER_COMPUTE_AXIS + 1, 1);
+        compute_pass.dispatch_workgroups(
+            self.extent.width / Self::PIXELS_PER_COMPUTE_AXIS + 1,
+            self.extent.height / Self::PIXELS_PER_COMPUTE_AXIS + 1,
+            1,
+        );
     }
 
     pub fn swap_framebuffers(&mut self, display: &mut Display) {
@@ -658,8 +698,8 @@ impl TemporalSmoothing {
     }
     pub fn set_accu_camera(&mut self, camera: &UniformBuffer<CameraUniform>) {
         let uniform = camera.data();
-        let self_uniform = self.accu_trafo_uniform.as_mut();
-        *self_uniform = *uniform;
+        let self_uniform = self.accu_frame_transformation.as_mut();
+        self_uniform.matrix = uniform.proj_matrix * uniform.view_matrix;
     }
     pub fn rewrite_bind_group(
         &mut self,
@@ -674,8 +714,8 @@ impl TemporalSmoothing {
             &self.accu_frame,
             &self.accu_depth,
             output_texture,
-            output_depth
-        );
+            output_depth,
+            &self.accu_frame_transformation);
     }
 
     fn build_bind_group(
@@ -686,6 +726,7 @@ impl TemporalSmoothing {
         accu_depth: &wgpu::TextureView,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
+        accu_trafo: &UniformBuffer<MatrixWrapper>,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("render target bind group of tempsmooth"),
@@ -715,6 +756,10 @@ impl TemporalSmoothing {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(output_depth),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: accu_trafo.buffer(), offset: 0, size: None }),
+                },
             ],
         })
     }
@@ -727,8 +772,8 @@ impl TemporalSmoothing {
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
     ) {
-        let ( c, cd, a, ad, bind_group) =
-            Self::create_render_target(device, width, height, output_texture, output_depth);
+        let (c, cd, a, ad, bind_group) =
+            Self::create_render_target(device, width, height, output_texture, output_depth, &self.accu_frame_transformation);
         self.bind_group = bind_group;
         self.accu_frame = a;
         self.accu_depth = ad;
@@ -797,11 +842,8 @@ impl Display {
             multiview: None,
         });
         let env_bg = Self::create_env_map_bg(device, None);
-        let (view, depth_view, sampler, bind_group) = Self::create_render_target(
-            device,
-            width,
-            height,
-        );
+        let (view, depth_view, sampler, bind_group) =
+            Self::create_render_target(device, width, height);
         Self {
             pipeline,
             view,
@@ -907,7 +949,12 @@ impl Display {
         device: &wgpu::Device,
         width: u32,
         height: u32,
-    ) -> (wgpu::TextureView, wgpu::TextureView, wgpu::Sampler, wgpu::BindGroup) {
+    ) -> (
+        wgpu::TextureView,
+        wgpu::TextureView,
+        wgpu::Sampler,
+        wgpu::BindGroup,
+    ) {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("display render image"),
             size: Extent3d {
@@ -943,7 +990,6 @@ impl Display {
             view_formats: &[],
         });
         let dt_view = depth_tex.create_view(&Default::default());
-
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
@@ -1061,6 +1107,7 @@ pub struct SplattingArgs {
     pub walltime: Duration,
     pub scene_center: Option<Point3<f32>>,
     pub scene_extend: Option<f32>,
+    pub current_colour_weight: f32,
 }
 
 impl Hash for SplattingArgs {
@@ -1081,6 +1128,8 @@ impl Hash for SplattingArgs {
             .as_ref()
             .map(|b| bytemuck::bytes_of(&b.max))
             .hash(state);
+
+        bytemuck::bytes_of(&self.current_colour_weight).hash(state);
     }
 }
 
@@ -1099,7 +1148,8 @@ pub struct SplattingArgsUniform {
     kernel_size: f32,
     walltime: f32,
     scene_extend: f32,
-    _pad: u32,
+    
+    current_coulour_weight: f32,
 
     scene_center: Vector4<f32>,
 }
@@ -1134,6 +1184,7 @@ impl SplattingArgsUniform {
                 .scene_extend
                 .unwrap_or(pc.bbox().radius())
                 .max(pc.bbox().radius()),
+            current_coulour_weight: args.current_colour_weight,
             ..Default::default()
         }
     }
@@ -1157,7 +1208,7 @@ impl Default for SplattingArgsUniform {
             walltime: 0.,
             scene_center: Vector4::new(0., 0., 0., 0.),
             scene_extend: 1.,
-            _pad: 0,
+            current_coulour_weight: TemporalSmoothing::CURRENT_COLOUR_WEIGHT,
         }
     }
 }

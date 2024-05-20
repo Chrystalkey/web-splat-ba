@@ -281,6 +281,7 @@ impl WindowContext {
                 walltime: Duration::ZERO,
                 scene_center: None,
                 scene_extend: None,
+                current_colour_weight: TemporalSmoothing::CURRENT_COLOUR_WEIGHT,
             },
             pc,
             // camera: view_camera,
@@ -450,6 +451,7 @@ impl WindowContext {
             self.display.rewrite_bind_group(&self.wgpu_context.device);
             self.temp_smoother.rewrite_bind_group(&self.wgpu_context.device, self.display.texture(), self.display.depth_texture());
 
+            // and now the main render pass
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -484,7 +486,7 @@ impl WindowContext {
             stopwatch.start(&mut encoder, "smoothing").unwrap();
         }
         // has no texture passed as input, because the textures are swapped in between render passes above  
-        self.temp_smoother.render(&mut encoder, self.renderer.camera());
+        self.temp_smoother.render(&mut encoder, self.renderer.camera(), self.renderer.render_settings());
         if let Some(stopwatch) = &mut self.stopwatch {
             stopwatch.stop(&mut encoder, "smoothing").unwrap();
         }
