@@ -92,7 +92,7 @@ where
         })
     }
 
-    /// uploads data from cpu to gpu if necesarry
+    /// uploads data from cpu to gpu if necessary
     pub fn sync(&mut self, queue: &wgpu::Queue) {
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.data]));
     }

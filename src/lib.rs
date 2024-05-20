@@ -521,6 +521,7 @@ impl WindowContext {
         }
 
         output.present();
+        self.temp_smoother.set_accu_camera(self.renderer.camera());
         Ok(())
     }
 

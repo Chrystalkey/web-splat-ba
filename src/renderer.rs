@@ -664,16 +664,17 @@ impl TemporalSmoothing {
         compute_pass.set_bind_group(2, self.accu_trafo_uniform.bind_group(), &[]);
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.dispatch_workgroups(self.extent.width, self.extent.height, 1);
-
-        // camera updates from raw data
-        todo!("copy camera data to temporary uniform buffer")
     }
 
     pub fn swap_framebuffers(&mut self, display: &mut Display) {
         std::mem::swap(display.texture_mut(), &mut self.accu_frame);
         std::mem::swap(display.depth_texture_mut(), &mut self.accu_depth);
     }
-
+    pub fn set_accu_camera(&mut self, camera: &UniformBuffer<CameraUniform>) {
+        let uniform = camera.data();
+        let self_uniform = self.accu_trafo_uniform.as_mut();
+        *self_uniform = *uniform;
+    }
     pub fn rewrite_bind_group(
         &mut self,
         device: &wgpu::Device,
