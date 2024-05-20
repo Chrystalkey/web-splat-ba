@@ -20,16 +20,14 @@ struct VertexOut {
 
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
 
-@group(1) @binding(0) var frameSampler: sampler;
+@group(1) @binding(0) var currentFrameTexture: texture_2d<f32>;
+@group(1) @binding(1) var currentFrameDepthTexture: texture_depth_2d;
 
-@group(1) @binding(1) var currentFrameTexture: texture_2d<f32>;
-@group(1) @binding(2) var currentFrameDepthTexture: texture_depth_2d;
+@group(1) @binding(2) var accuTexture: texture_storage_2d<rgba16float, read_write>;
+@group(1) @binding(3) var accuDepth: texture_storage_2d<r32float, read_write>;
 
-@group(1) @binding(3) var accuTexture: texture_storage_2d<rgba16float, read_write>;
-@group(1) @binding(4) var accuDepth: texture_storage_2d<r32float, read_write>;
-
-@group(1) @binding(5) var dstTexture: texture_storage_2d<rgba16float, read_write>;
-@group(1) @binding(6) var dstDepth: texture_storage_2d<r32float, read_write>;
+@group(1) @binding(4) var dstTexture: texture_storage_2d<rgba16float, read_write>;
+@group(1) @binding(5) var dstDepth: texture_storage_2d<r32float, read_write>;
 
 @group(2) @binding(0) var<uniform> accu_camera: CameraUniforms;
 

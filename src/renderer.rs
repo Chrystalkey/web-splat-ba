@@ -424,7 +424,6 @@ impl PreprocessPipeline {
 pub struct TemporalSmoothing {
     pipeline: wgpu::ComputePipeline,
     bind_group: wgpu::BindGroup,
-    sampler: wgpu::Sampler,
 
     extent: wgpu::Extent3d,
     // frame buffer for the accumulation buffer
@@ -454,16 +453,9 @@ impl TemporalSmoothing {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("prev frame info bind group layout"),
             entries: &[
-                // sampler
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
                 // current frame, to be sampled
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -474,7 +466,7 @@ impl TemporalSmoothing {
                 },
                 // current frame's depth texture
                 wgpu::BindGroupLayoutEntry {
-                    binding: 2,
+                    binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
@@ -485,7 +477,7 @@ impl TemporalSmoothing {
                 },
                 // accumulator frame
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::ReadWrite,
@@ -496,7 +488,7 @@ impl TemporalSmoothing {
                 },
                 // accumulator frame depth map
                 wgpu::BindGroupLayoutEntry {
-                    binding: 4,
+                    binding: 3,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::ReadWrite,
@@ -507,7 +499,7 @@ impl TemporalSmoothing {
                 },
                 // dst frame, output texture
                 wgpu::BindGroupLayoutEntry {
-                    binding: 5,
+                    binding: 4,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::ReadWrite,
@@ -518,7 +510,7 @@ impl TemporalSmoothing {
                 },
                 // dst frame depth map
                 wgpu::BindGroupLayoutEntry {
-                    binding: 6,
+                    binding: 5,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::StorageTexture {
                         access: wgpu::StorageTextureAccess::ReadWrite,
@@ -555,7 +547,7 @@ impl TemporalSmoothing {
             module: &shader,
             entry_point: "cs_main",
         });
-        let ( sampler, current_frame, current_depth,accu_frame, accu_depth, bind_group) =
+        let ( current_frame, current_depth,accu_frame, accu_depth, bind_group) =
             Self::create_render_target(device, width, height, output_texture, output_depth);
 
         Self {
@@ -566,7 +558,6 @@ impl TemporalSmoothing {
                 height,
                 depth_or_array_layers: 1,
             },
-            sampler,
             current_frame,
             current_depth,
             accu_frame,
@@ -582,7 +573,6 @@ impl TemporalSmoothing {
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
     ) -> (
-        wgpu::Sampler,
         wgpu::TextureView,
         wgpu::TextureView,
         wgpu::TextureView,
@@ -594,11 +584,6 @@ impl TemporalSmoothing {
             height,
             depth_or_array_layers: 1,
         };
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
         let current_frame = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("currently rendered image"),
             size: extent.clone(),
@@ -647,8 +632,8 @@ impl TemporalSmoothing {
         let acd_view = accu_depth.create_view(&Default::default());
 
         let bind_group =
-            Self::build_bind_group(device, &sampler, &cf_view, &cfd_view, &ac_view, &acd_view, output_texture, output_depth);
-        return (sampler, cf_view, cfd_view, ac_view, acd_view, bind_group);
+            Self::build_bind_group(device, &cf_view, &cfd_view, &ac_view, &acd_view, output_texture, output_depth);
+        return (cf_view, cfd_view, ac_view, acd_view, bind_group);
     }
 
     pub fn render(
@@ -684,7 +669,6 @@ impl TemporalSmoothing {
     ) {
         self.bind_group = Self::build_bind_group(
             device,
-            &self.sampler,
             &self.current_frame,
             &self.current_depth,
             &self.accu_frame,
@@ -696,7 +680,6 @@ impl TemporalSmoothing {
 
     fn build_bind_group(
         device: &wgpu::Device,
-        sampler: &wgpu::Sampler,
         current_frame: &wgpu::TextureView,
         current_depth: &wgpu::TextureView,
         accu_frame: &wgpu::TextureView,
@@ -710,30 +693,26 @@ impl TemporalSmoothing {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Sampler(sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
                     resource: wgpu::BindingResource::TextureView(current_frame),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding: 1,
                     resource: wgpu::BindingResource::TextureView(current_depth),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 3,
+                    binding: 2,
                     resource: wgpu::BindingResource::TextureView(accu_frame),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding: 3,
                     resource: wgpu::BindingResource::TextureView(accu_depth),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 5,
+                    binding: 4,
                     resource: wgpu::BindingResource::TextureView(output_texture),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 6,
+                    binding: 5,
                     resource: wgpu::BindingResource::TextureView(output_depth),
                 },
             ],
@@ -748,10 +727,9 @@ impl TemporalSmoothing {
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
     ) {
-        let (sampler, c, cd, a, ad, bind_group) =
+        let ( c, cd, a, ad, bind_group) =
             Self::create_render_target(device, width, height, output_texture, output_depth);
         self.bind_group = bind_group;
-        self.sampler = sampler;
         self.accu_frame = a;
         self.accu_depth = ad;
         self.current_frame = c;
