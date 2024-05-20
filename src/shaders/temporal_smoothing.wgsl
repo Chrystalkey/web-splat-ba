@@ -37,15 +37,16 @@ struct VertexOut {
 fn reproject_position(current_position: vec4<f32>, vp_accu: mat4x4<f32>, ivp_current: mat4x4<f32>) -> vec4<f32> {
     return vp_accu * ivp_current * current_position;
 }
+const EPSILON = 1e-10;
 
 @compute @workgroup_size(1)
 fn cs_main(@builtin(global_invocation_id) id: vec3u) {
     let tex_dims = textureDimensions(currentFrameTexture); // assumes all texture have the same dimensions
     let current_position = id.xy;
     let current_colour = textureLoad(currentFrameTexture, current_position, 0);
-    //let current_depth = textureLoad(currentFrameDepthTexture, current_position, 0);
+    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0), 0.);
     
-    let current_v4_pos = vec4<f32>(vec2<f32>(current_position), 1, textureLoad(currentFrameDepthTexture, current_position, 0));
+    let current_v4_pos = vec4<f32>(vec2<f32>(current_position), current_depth.x, 1);
     let reprojected_pos = reproject_position(
         current_v4_pos,
         accu_camera.proj * accu_camera.view,
@@ -55,8 +56,13 @@ fn cs_main(@builtin(global_invocation_id) id: vec3u) {
 
 
     let accu_colour = textureLoad(accuTexture, reproj_coordinates);
-    let final_colour = (current_colour + accu_colour) / 2;
+    let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_coordinates.xy).x, 0.);
+
+    var final_colour = (current_colour + accu_colour) / 2;
+    if (abs(accu_depth.x - current_depth.x) < EPSILON) {
+        final_colour = vec4<f32>(1.,1.,1.,.5);
+    }
     // write the texture points into the receiving buffer
     textureStore(dstTexture, current_position, final_colour);
-    //textureStore(dstDepth, reproj_coordinates, textureLoad(currentFrameDepthTexture, current_position, 0));
+    textureStore(dstDepth, current_position, vec4<f32>(current_depth.x, 0., 0., 0.));
 }
