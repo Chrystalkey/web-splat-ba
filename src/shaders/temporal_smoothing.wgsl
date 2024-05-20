@@ -23,7 +23,7 @@ struct VertexOut {
 @group(1) @binding(0) var frameSampler: sampler;
 
 @group(1) @binding(1) var currentFrameTexture: texture_2d<f32>;
-@group(1) @binding(2) var currentFrameDepthTexture: texture_2d<f32>;
+@group(1) @binding(2) var currentFrameDepthTexture: texture_depth_2d;
 
 @group(1) @binding(3) var accuTexture: texture_storage_2d<rgba16float, read_write>;
 @group(1) @binding(4) var accuDepth: texture_storage_2d<r32float, read_write>;
@@ -33,13 +33,30 @@ struct VertexOut {
 
 @group(2) @binding(0) var<uniform> accu_camera: CameraUniforms;
 
+
+fn reproject_position(current_position: vec4<f32>, vp_accu: mat4x4<f32>, ivp_current: mat4x4<f32>) -> vec4<f32> {
+    return vp_accu * ivp_current * current_position;
+}
+
 @compute @workgroup_size(1)
 fn cs_main(@builtin(global_invocation_id) id: vec3u) {
     let tex_dims = textureDimensions(currentFrameTexture); // assumes all texture have the same dimensions
-    let position = id.xy;
-    let current_colour = textureLoad(currentFrameTexture, position, 0);
-    let accu_colour = textureLoad(accuTexture, position);
+    let current_position = id.xy;
+    let current_colour = textureLoad(currentFrameTexture, current_position, 0);
+    //let current_depth = textureLoad(currentFrameDepthTexture, current_position, 0);
+    
+    let current_v4_pos = vec4<f32>(vec2<f32>(current_position), 1, textureLoad(currentFrameDepthTexture, current_position, 0));
+    let reprojected_pos = reproject_position(
+        current_v4_pos,
+        accu_camera.proj * accu_camera.view,
+        camera.proj_inv * camera.view
+    );
+    let reproj_coordinates = vec2<u32>(reprojected_pos.xy);
+
+
+    let accu_colour = textureLoad(accuTexture, reproj_coordinates);
     let final_colour = (current_colour + accu_colour) / 2;
     // write the texture points into the receiving buffer
-    textureStore(dstTexture, position, final_colour);
+    textureStore(dstTexture, current_position, final_colour);
+    //textureStore(dstDepth, reproj_coordinates, textureLoad(currentFrameDepthTexture, current_position, 0));
 }
