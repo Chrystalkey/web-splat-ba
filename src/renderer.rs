@@ -442,6 +442,7 @@ impl TemporalSmoothing {
     pub const OUT_TEXTURE_FORMAT_COL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
     pub const OUT_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
     pub const IN_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    pub const PIXELS_PER_COMPUTE_AXIS: u32 = 4;
 
     pub fn texture(&self) -> &wgpu::TextureView {
         &self.current_frame
@@ -663,7 +664,7 @@ impl TemporalSmoothing {
         compute_pass.set_bind_group(1, &self.bind_group, &[]);
         compute_pass.set_bind_group(2, self.accu_trafo_uniform.bind_group(), &[]);
         compute_pass.set_pipeline(&self.pipeline);
-        compute_pass.dispatch_workgroups(self.extent.width, self.extent.height, 1);
+        compute_pass.dispatch_workgroups(self.extent.width/Self::PIXELS_PER_COMPUTE_AXIS +1, self.extent.height/Self::PIXELS_PER_COMPUTE_AXIS + 1, 1);
     }
 
     pub fn swap_framebuffers(&mut self, display: &mut Display) {

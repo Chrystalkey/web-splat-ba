@@ -33,40 +33,57 @@ struct VertexOut {
 
 @group(2) @binding(0) var<uniform> accu_camera: CameraUniforms;
 
+const EPSILON = 1e-3;
+const CURRENT_COLOUR_WEIGHT = 0.01; // may be noteworthy to write about this in the paper
 
 fn reproject_position(current_position: vec4<f32>, vp_accu: mat4x4<f32>, ivp_current: mat4x4<f32>) -> vec4<f32> {
     return vp_accu * ivp_current * current_position;
 }
-const EPSILON = 1e-5;
-const CURRENT_COLOUR_WEIGHT = 0.7;
 
-@compute @workgroup_size(1)
-fn cs_main(@builtin(global_invocation_id) id: vec3u) {
+fn smooth_out_at(pixel_coordinate: vec2u) {
     let tex_dims = textureDimensions(currentFrameTexture); // assumes all texture have the same dimensions
-    let current_position = id.xy;
+    let current_position = pixel_coordinate;
     let current_colour = textureLoad(currentFrameTexture, current_position, 0);
-    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0), 0.);
-    
-    let current_v4_pos = vec4<f32>(vec2<f32>(current_position)/camera.viewport, 1., current_depth.x);
+    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0), 0.) / current_colour.a;
+
+    let current_v4_pos = vec4<f32>(vec2<f32>(current_position) / camera.viewport, 1., current_depth.x);
     let reprojected_pos = reproject_position(
         current_v4_pos,
         accu_camera.proj * accu_camera.view,
         camera.view_inv * camera.proj_inv
     );
-    let reproj_coordinates = vec2<u32>(reprojected_pos.xy);
+    let reproj_pos = vec2<u32>(reprojected_pos.xy);
 
 
-    let accu_colour = textureLoad(accuTexture, reproj_coordinates);
-    let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_coordinates.xy).x, 0.);
-    
-    var final_colour = vec4<f32>();
-    if (abs(accu_depth.x - current_depth.x) > EPSILON) {
-        final_colour = current_colour*CURRENT_COLOUR_WEIGHT + accu_colour*(1.-CURRENT_COLOUR_WEIGHT);
-    }else {
-        final_colour = current_colour;
-    };
+    let accu_colour = textureLoad(accuTexture, reproj_pos);
+    let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
+
+    var final_colour = current_colour;
+    if abs(accu_depth.x - current_depth.x) > EPSILON {
+        final_colour = current_colour * CURRENT_COLOUR_WEIGHT + accu_colour * (1. - CURRENT_COLOUR_WEIGHT);
+    }
     
     // write the texture points into the receiving buffer
     textureStore(dstTexture, current_position, final_colour);
     textureStore(dstDepth, current_position, vec4<f32>(current_depth.x, 0., 0., 0.));
+}
+
+@compute @workgroup_size(1)
+fn cs_main(@builtin(global_invocation_id) id: vec3u) {
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(0u, 0u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(0u, 1u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(0u, 2u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(0u, 3u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(1u, 0u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(1u, 1u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(1u, 2u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(1u, 3u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(2u, 0u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(2u, 1u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(2u, 2u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(2u, 3u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(3u, 0u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(3u, 1u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(3u, 2u)));
+    smooth_out_at(vec2u(id.xy * 4 + vec2<u32>(3u, 3u)));
 }
