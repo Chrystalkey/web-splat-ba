@@ -696,11 +696,13 @@ impl TemporalSmoothing {
         std::mem::swap(display.texture_mut(), &mut self.accu_frame);
         std::mem::swap(display.depth_texture_mut(), &mut self.accu_depth);
     }
+
     pub fn set_accu_camera(&mut self, camera: &UniformBuffer<CameraUniform>) {
         let uniform = camera.data();
         let self_uniform = self.accu_frame_transformation.as_mut();
-        self_uniform.value =  uniform.proj_matrix * uniform.view_matrix;
+        self_uniform.value = uniform.proj_matrix * uniform.view_matrix;
     }
+
     pub fn rewrite_bind_group(
         &mut self,
         device: &wgpu::Device,

@@ -34,20 +34,29 @@ use winit::{
 
 mod animation;
 mod ui;
+
 pub use animation::{Animation, Sampler, TrackingShot, Transition};
+
 mod camera;
+
 pub use camera::{Camera, PerspectiveCamera, PerspectiveProjection};
+
 mod controller;
+
 pub use controller::CameraController;
+
 mod pointcloud;
+
 pub use pointcloud::PointCloud;
 
 pub mod io;
 
 mod renderer;
+
 pub use renderer::{GaussianRenderer, SplattingArgs};
 
 mod scene;
+
 use crate::{renderer::TemporalSmoothing, utils::GPUStopwatch};
 
 pub use self::scene::{Scene, SceneCamera, Split};
@@ -86,9 +95,9 @@ impl WGPUContext {
         log::info!("using {}",adapter.get_info().name);
 
         #[cfg(target_arch = "wasm32")]
-        let required_features = wgpu::Features::default();
+            let required_features = wgpu::Features::default();
         #[cfg(not(target_arch = "wasm32"))]
-        let required_features = wgpu::Features::TIMESTAMP_QUERY
+            let required_features = wgpu::Features::TIMESTAMP_QUERY
             | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
             | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
 
@@ -250,10 +259,10 @@ impl WindowContext {
             size.width,
             size.height,
         );
-        let temp_smoother : TemporalSmoothing = TemporalSmoothing::new(device, 
-             display.texture(),
-             display.depth_texture(),
-              size.width, size.height);
+        let temp_smoother: TemporalSmoothing = TemporalSmoothing::new(device,
+                                                                      display.texture(),
+                                                                      display.depth_texture(),
+                                                                      size.width, size.height);
 
 
         let stopwatch = if cfg!(not(target_arch = "wasm32")) {
@@ -308,6 +317,7 @@ impl WindowContext {
         })
     }
 
+    /// Reloads the point cloud file and reinits the rendering engine
     fn reload(&mut self) -> anyhow::Result<()> {
         if let Some(file_path) = &self.pointcloud_file_path {
             log::info!("reloading volume from {:?}", file_path);
@@ -336,14 +346,14 @@ impl WindowContext {
                 .resize(&self.wgpu_context.device, new_size.width, new_size.height);
             self.temp_smoother
                 .resize(&self.wgpu_context.device, new_size.width, new_size.height,
-                self.display.texture(), &self.display.depth_texture());
+                        self.display.texture(), &self.display.depth_texture());
             self.splatting_args
                 .camera
                 .projection
                 .resize(new_size.width, new_size.height);
             self.splatting_args.viewport = Vector2::new(new_size.width, new_size.height);
             self.splatting_args.camera.projection
-            .resize(new_size.width,new_size.height);
+                .resize(new_size.width, new_size.height);
         }
         if let Some(scale_factor) = scale_factor {
             if scale_factor > 0. {
@@ -479,7 +489,6 @@ impl WindowContext {
             });
 
             self.renderer.render(&mut render_pass, &self.pc);
-
         }
         if let Some(stopwatch) = &mut self.stopwatch {
             stopwatch.stop(&mut encoder, "rasterization").unwrap();
@@ -766,126 +775,124 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
 
     let mut last = Instant::now();
 
-    event_loop.run(move |event,target| 
-        
+    event_loop.run(move |event, target|
+
         match event {
-        Event::WindowEvent {
-            ref event,
-            window_id,
-        } if window_id == state.window.id() && !state.ui_renderer.on_event(&state.window,event) => match event {
-            WindowEvent::Resized(physical_size) => {
-                state.resize(*physical_size, None);
-            }
-            WindowEvent::ScaleFactorChanged {
-                scale_factor,
-                ..
-            } => {
-                state.scale_factor = *scale_factor as f32;
-            }
-            WindowEvent::CloseRequested => {log::info!("close!");target.exit()},
-            WindowEvent::ModifiersChanged(m)=>{
-                state.controller.alt_pressed = m.state().alt_key();
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let PhysicalKey::Code(key) = event.physical_key{
-                if event.state == ElementState::Released{
+            Event::WindowEvent {
+                ref event,
+                window_id,
+            } if window_id == state.window.id() && !state.ui_renderer.on_event(&state.window, event) => match event {
+                WindowEvent::Resized(physical_size) => {
+                    state.resize(*physical_size, None);
+                }
+                WindowEvent::ScaleFactorChanged {
+                    scale_factor,
+                    ..
+                } => {
+                    state.scale_factor = *scale_factor as f32;
+                }
+                WindowEvent::CloseRequested => {
+                    log::info!("close!");
+                    target.exit()
+                }
+                WindowEvent::ModifiersChanged(m) => {
+                    state.controller.alt_pressed = m.state().alt_key();
+                }
+                WindowEvent::KeyboardInput { event, .. } => {
+                    if let PhysicalKey::Code(key) = event.physical_key {
+                        if event.state == ElementState::Released {
+                            if key == KeyCode::KeyT {
+                                if state.animation.is_none() {
+                                    state.start_tracking_shot();
+                                } else {
+                                    state.stop_animation()
+                                }
+                            } else if key == KeyCode::KeyU {
+                                state.ui_visible = !state.ui_visible;
+                            } else if key == KeyCode::KeyC {
+                                state.save_view();
+                            } else if key == KeyCode::KeyR && state.controller.alt_pressed {
+                                if let Err(err) = state.reload() {
+                                    log::error!("failed to reload volume: {:?}", err);
+                                }
+                            } else if let Some(scene) = &state.scene {
+                                let new_camera =
+                                    if let Some(num) = key_to_num(key) {
+                                        Some(num as usize)
+                                    } else if key == KeyCode::KeyR {
+                                        Some(rand::random::<usize>() % scene.num_cameras())
+                                    } else if key == KeyCode::KeyN {
+                                        scene.nearest_camera(state.splatting_args.camera.position, None)
+                                    } else if key == KeyCode::PageUp {
+                                        Some(state.current_view.map_or(0, |v| v + 1) % scene.num_cameras())
+                                    } else if key == KeyCode::KeyT {
+                                        Some(state.current_view.map_or(0, |v| v + 1) % scene.num_cameras())
+                                    } else if key == KeyCode::PageDown {
+                                        Some(state.current_view.map_or(0, |v| v - 1) % scene.num_cameras())
+                                    } else { None };
 
-                    if key == KeyCode::KeyT{
-                        if state.animation.is_none(){
-                            state.start_tracking_shot();
-                        }else{
-                            state.stop_animation()
+                                if let Some(new_camera) = new_camera {
+                                    state.set_scene_camera(new_camera);
+                                }
+                            }
                         }
-                    }else if key == KeyCode::KeyU{
-                        state.ui_visible = !state.ui_visible;
-                        
-                    }else if key == KeyCode::KeyC{
-                        state.save_view();
-                    } else  if key == KeyCode::KeyR && state.controller.alt_pressed{
-                        if let Err(err) = state.reload(){
-                            log::error!("failed to reload volume: {:?}", err);
-                        }   
-                    }else if let Some(scene) = &state.scene{
-
-                        let new_camera = 
-                        if let Some(num) = key_to_num(key){
-                            Some(num as usize)
-                        }
-                        else if key == KeyCode::KeyR{
-                            Some(rand::random::<usize>()%scene.num_cameras())
-                        }else if key == KeyCode::KeyN{
-                            scene.nearest_camera(state.splatting_args.camera.position,None)
-                        }else if key == KeyCode::PageUp{
-                            Some(state.current_view.map_or(0, |v|v+1) % scene.num_cameras())
-                        }else if key == KeyCode::KeyT{
-                            Some(state.current_view.map_or(0, |v|v+1) % scene.num_cameras())
-                        }
-                        else if key == KeyCode::PageDown{
-                            Some(state.current_view.map_or(0, |v|v-1) % scene.num_cameras())
-                        }else{None};
-
-                        if let Some(new_camera) = new_camera{
-                            state.set_scene_camera(new_camera);
-                        }
+                        state
+                            .controller
+                            .process_keyboard(key, event.state == ElementState::Pressed);
                     }
                 }
-                state
-                    .controller
-                    .process_keyboard(key, event.state == ElementState::Pressed);
-            }
-            }
-            WindowEvent::MouseWheel { delta, .. } => match delta {
-                winit::event::MouseScrollDelta::LineDelta(_, dy) => {
-                    state.controller.process_scroll(*dy )
+                WindowEvent::MouseWheel { delta, .. } => match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, dy) => {
+                        state.controller.process_scroll(*dy)
+                    }
+                    winit::event::MouseScrollDelta::PixelDelta(p) => {
+                        state.controller.process_scroll(p.y as f32 / 100.)
+                    }
+                },
+                WindowEvent::MouseInput { state: button_state, button, .. } => {
+                    match button {
+                        winit::event::MouseButton::Left => state.controller.left_mouse_pressed = *button_state == ElementState::Pressed,
+                        winit::event::MouseButton::Right => state.controller.right_mouse_pressed = *button_state == ElementState::Pressed,
+                        _ => {}
+                    }
                 }
-                winit::event::MouseScrollDelta::PixelDelta(p) => {
-                    state.controller.process_scroll(p.y as f32 / 100.)
+                WindowEvent::RedrawRequested => {
+                    let now = Instant::now();
+                    let dt = now - last;
+                    last = now;
+                    state.update(dt);
+
+                    match state.render() {
+                        Ok(_) => {}
+                        // Reconfigure the surface if lost
+                        Err(wgpu::SurfaceError::Lost) => state.resize(state.window.inner_size(), None),
+                        // The system is out of memory, we should probably quit
+                        Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
+                        // All other errors (Outdated, Timeout) should be resolved by the next frame
+                        Err(e) => println!("error: {:?}", e),
+                    }
                 }
+                _ => {}
             },
-            WindowEvent::MouseInput { state:button_state, button, .. }=>{
-                match button {
-                    winit::event::MouseButton::Left =>                         state.controller.left_mouse_pressed = *button_state == ElementState::Pressed,
-                    winit::event::MouseButton::Right => state.controller.right_mouse_pressed = *button_state == ElementState::Pressed,
-                    _=>{}
-                }
+            Event::DeviceEvent {
+                event: DeviceEvent::MouseMotion { delta, },
+                .. // We're not using device_id currently
+            } => {
+                state.controller.process_mouse(delta.0 as f32, delta.1 as f32)
             }
-            WindowEvent::RedrawRequested => {
-                let now = Instant::now();
-                let dt = now-last;
-                last = now;
-                state.update(dt);
-    
-                match state.render() {
-                    Ok(_) => {}
-                    // Reconfigure the surface if lost
-                    Err(wgpu::SurfaceError::Lost) => state.resize(state.window.inner_size(), None),
-                    // The system is out of memory, we should probably quit
-                    Err(wgpu::SurfaceError::OutOfMemory) =>target.exit(),
-                    // All other errors (Outdated, Timeout) should be resolved by the next frame
-                    Err(e) => println!("error: {:?}", e),
-                }
+
+            Event::AboutToWait => {
+                // RedrawRequested will only trigger once, unless we manually
+                // request it.
+                state.window.request_redraw();
             }
             _ => {}
-        },
-        Event::DeviceEvent {
-            event: DeviceEvent::MouseMotion{ delta, },
-            .. // We're not using device_id currently
-        } => {
-            state.controller.process_mouse(delta.0 as f32, delta.1 as f32)
-        }
-        
-        Event::AboutToWait => {
-            // RedrawRequested will only trigger once, unless we manually
-            // request it.
-            state.window.request_redraw();
-        }
-        _ => {},
-    }).unwrap();
+        }).unwrap();
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub async fn run_wasm(pc: Vec<u8>, scene: Option<Vec<u8>>,pc_file:Option<String>,scene_file:Option<String>) {
+pub async fn run_wasm(pc: Vec<u8>, scene: Option<Vec<u8>>, pc_file: Option<String>, scene_file: Option<String>) {
     use std::{io::Cursor, str::FromStr};
 
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -896,8 +903,8 @@ pub async fn run_wasm(pc: Vec<u8>, scene: Option<Vec<u8>>,pc_file:Option<String>
     wasm_bindgen_futures::spawn_local(open_window(
         pc_reader,
         scene_reader,
-        RenderConfig { no_vsync: false,skybox:None,hdr:false },
-        pc_file.and_then(|s|PathBuf::from_str(s.as_str()).ok()),
-        scene_file.and_then(|s|PathBuf::from_str(s.as_str()).ok()),
+        RenderConfig { no_vsync: false, skybox: None, hdr: false },
+        pc_file.and_then(|s| PathBuf::from_str(s.as_str()).ok()),
+        scene_file.and_then(|s| PathBuf::from_str(s.as_str()).ok()),
     ));
 }

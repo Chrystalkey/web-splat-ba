@@ -26,11 +26,6 @@ struct MatrixWrapper {
     value: mat4x4<f32>,
 };
 
-struct VertexOut {
-    @builtin(position) pos: vec4<f32>,
-    @location(0) tex_coord: vec2<f32>,
-};
-
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
 
 @group(1) @binding(0) var currentFrameTexture: texture_2d<f32>;
@@ -47,39 +42,30 @@ struct VertexOut {
 
 const EPSILON = 1e-3;
 
-fn reproject_position(current_position: vec4<f32>, vp_accu: mat4x4<f32>, ivp_current: mat4x4<f32>) -> vec4<f32> {
-    return vp_accu * ivp_current * current_position;
-}
-
 fn smooth_out_at(pixel_coordinate: vec2u) {
-    let tex_dims = textureDimensions(currentFrameTexture); // assumes all texture have the same dimensions
+    let tex_dims = vec2<f32>(textureDimensions(currentFrameTexture).xy); // assumes all texture have the same dimensions
     let current_position = pixel_coordinate;
     let current_colour = textureLoad(currentFrameTexture, current_position, 0);
     // divided by current alpha cause simon said so
     let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0), 0.) / current_colour.a;
     // ndc
-    let current_v4_pos = vec4<f32>((vec2<f32>(current_position)/camera.viewport * 2) - vec2<f32>(1.,1.), 1., current_depth.x);
-    // 0..1
-    // let current_v4_pos = vec4<f32>(vec2<f32>(current_position)/camera.viewport, 1., current_depth.x);
-    // without changes
-    // let current_v4_pos = vec4<f32>(vec2<f32>(current_position), 1., current_depth.x);
-    let reprojected_pos = reproject_position(
-        current_v4_pos,
-        accu_vp.value,
-        camera.view_inv*camera.proj_inv
-    );
+    let current_v4_pos = vec4<f32>((vec2<f32>(current_position)/tex_dims * 2) - vec2<f32>(1.,1.), current_depth.x, 1.);
+
+    let reprojected_pos = accu_vp.value * camera.view_inv*camera.proj_inv * current_v4_pos;
+
     // ndc
-    let reproj_pos = (reprojected_pos.xy+vec2<f32>(1.,1.))/2.*camera.viewport;
-
-    // 0..1
-    //let reproj_pos = reprojected_pos.xy*camera.viewport;
-
-    // unchanged
-    // let reproj_pos = reprojected_pos.xy;
+    let reproj_pos = (reprojected_pos.xy+vec2<f32>(1.,1.))/2.*tex_dims;
+    // I have honestly not the faintest Idea why the transformation is so terribly skewed. It is rotated wrongly,
+    // scaled wrongly and to make matters worse it is even projected wrongly.
+    // Ideas as to what the problem is:
+    // - coordinate system is somehow wrong (flipped axis or not ndc or whatever)
+    // - some uniform buffer is not being updated and only part of the transformation is actually "recent" (do I need to manually sync the accu_vp?)
+    // - the ordering of the arguments is wrong (depth on third or on fourth component?)
+    // - the depth value is somehow wrong (divided by alpha or not or somehow even more different)
 
     var final_colour = current_colour;
-    if  reproj_pos.x >= 0 && reproj_pos.x < camera.viewport.x &&
-        reproj_pos.y >= 0 && reproj_pos.y < camera.viewport.y {
+    if  (reproj_pos.x >= 0 && reproj_pos.x < tex_dims.x &&
+         reproj_pos.y >= 0 && reproj_pos.y < tex_dims.y) {
         let reproj_pos = vec2<u32>(reproj_pos);
         let accu_colour = textureLoad(accuTexture, reproj_pos);
         let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
