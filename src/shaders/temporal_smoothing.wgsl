@@ -22,8 +22,9 @@ struct RenderSettings {
     center: vec3<f32>,
 };
 
-struct MatrixWrapper {
-    value: mat4x4<f32>,
+struct ReprojectionData {
+    vp_accu: mat4x4<f32>,
+    reprojection: mat4x4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
@@ -37,24 +38,30 @@ struct MatrixWrapper {
 @group(1) @binding(4) var dstTexture: texture_storage_2d<rgba16float, read_write>;
 @group(1) @binding(5) var dstDepth: texture_storage_2d<r32float, read_write>;
 
-@group(1) @binding(6) var<uniform> accu_vp: MatrixWrapper;
 @group(2) @binding(0) var<uniform> render_settings: RenderSettings;
+@group(3) @binding(0) var<uniform> reprojection_data: ReprojectionData;
 
 const EPSILON = 1e-3;
 
 fn smooth_out_at(pixel_coordinate: vec2u) {
     let tex_dims = vec2<f32>(textureDimensions(currentFrameTexture).xy); // assumes all texture have the same dimensions
     let current_position = pixel_coordinate;
-    let current_colour = textureLoad(currentFrameTexture, current_position, 0);
+    let current_colour = textureLoad(currentFrameTexture, current_position, 0) ;
     // divided by current alpha cause simon said so
-    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0), 0.) / current_colour.a;
-    // ndc
-    let current_v4_pos = vec4<f32>((vec2<f32>(current_position)/tex_dims * 2) - vec2<f32>(1.,1.), current_depth.x, 1.);
-
-    let reprojected_pos = accu_vp.value * camera.view_inv*camera.proj_inv * current_v4_pos;
+    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0), 0.)/ current_colour.a;
 
     // ndc
-    let reproj_pos = (reprojected_pos.xy+vec2<f32>(1.,1.))/2.*tex_dims;
+    let current_v4_pos_ndc = vec4<f32>(
+        (vec2<f32>(current_position)/tex_dims * 2) - vec2<f32>(1., 1.),
+        current_depth.x,
+        1.
+    );
+    let current_pos_clip = current_v4_pos_ndc / current_depth.x;
+
+    let reprojected_pos = reprojection_data.reprojection * current_pos_clip;
+
+    // ndc
+    let reproj_pos = ((reprojected_pos / reprojected_pos.w).xy + vec2(1., 1.))  * tex_dims /2.;
     // I have honestly not the faintest Idea why the transformation is so terribly skewed. It is rotated wrongly,
     // scaled wrongly and to make matters worse it is even projected wrongly.
     // Ideas as to what the problem is:
@@ -69,7 +76,8 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
         let reproj_pos = vec2<u32>(reproj_pos);
         let accu_colour = textureLoad(accuTexture, reproj_pos);
         let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
-        final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
+        //final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
+        final_colour = vec4<f32>(.8,0,0,1);
     }
 
     // write the texture points into the receiving buffer

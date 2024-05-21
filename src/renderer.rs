@@ -419,13 +419,21 @@ impl PreprocessPipeline {
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-struct MatrixWrapper {
-    value: Matrix4<f32>,
+struct ReprojectionData {
+    vp_accu: Matrix4<f32>,
+    reprojection: Matrix4<f32>,
 }
-impl Default for MatrixWrapper{
+impl ReprojectionData{
+    fn set_current_camera(&mut self, camera: &UniformBuffer<CameraUniform>){
+        self.reprojection = self.vp_accu * camera.data().view_inv_matrix*camera.data().proj_inv_matrix;
+        self.vp_accu = camera.data().proj_matrix*camera.data().view_matrix;
+    }
+}
+impl Default for ReprojectionData{
     fn default() -> Self {
         Self {
-            value: Matrix4::identity(),
+            vp_accu: Matrix4::identity(),
+            reprojection: Matrix4::identity(),
         }
     }
 
@@ -441,7 +449,7 @@ pub struct TemporalSmoothing {
     // frame buffer for the accumulation buffer
     accu_frame: wgpu::TextureView,
     accu_depth: wgpu::TextureView,
-    accu_frame_transformation: UniformBuffer<MatrixWrapper>,
+    reprojection_data: UniformBuffer<ReprojectionData>,
 
     // frame buffer for the frame just finished by the main render pass and Depth Texture
     current_frame: wgpu::TextureView,
@@ -531,17 +539,6 @@ impl TemporalSmoothing {
                     },
                     count: None,
                 },
-                // previous frame transformation
-                wgpu::BindGroupLayoutEntry {
-                    binding: 6,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
             ],
         })
     }
@@ -559,6 +556,7 @@ impl TemporalSmoothing {
                 &UniformBuffer::<CameraUniform>::bind_group_layout(device),
                 &Self::bind_group_layout(device),
                 &UniformBuffer::<SplattingArgsUniform>::bind_group_layout(device),
+                &UniformBuffer::<ReprojectionData>::bind_group_layout(device)
             ],
             push_constant_ranges: &[],
         });
@@ -570,9 +568,9 @@ impl TemporalSmoothing {
             module: &shader,
             entry_point: "cs_main",
         });
-        let trafo_uniform = UniformBuffer::new_default(device, Some("accu frame transformation"));
+        let reprojection_data = UniformBuffer::new_default(device, Some("accu frame transformation"));
         let (current_frame, current_depth, accu_frame, accu_depth, bind_group) =
-            Self::create_render_target(device, width, height, output_texture, output_depth, &trafo_uniform);
+            Self::create_render_target(device, width, height, output_texture, output_depth);
 
         Self {
             pipeline,
@@ -586,7 +584,7 @@ impl TemporalSmoothing {
             current_depth,
             accu_frame,
             accu_depth,
-            accu_frame_transformation: trafo_uniform,
+            reprojection_data,
         }
     }
 
@@ -596,7 +594,6 @@ impl TemporalSmoothing {
         height: u32,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
-        accu_trafo: &UniformBuffer<MatrixWrapper>,
     ) -> (
         wgpu::TextureView,
         wgpu::TextureView,
@@ -665,8 +662,7 @@ impl TemporalSmoothing {
             &ac_view,
             &acd_view,
             output_texture,
-            output_depth,
-            accu_trafo,
+            output_depth
         );
         return (cf_view, cfd_view, ac_view, acd_view, bind_group);
     }
@@ -684,6 +680,7 @@ impl TemporalSmoothing {
         compute_pass.set_bind_group(0, camera_uniform.bind_group(), &[]);
         compute_pass.set_bind_group(1, &self.bind_group, &[]);
         compute_pass.set_bind_group(2, render_settings.bind_group(), &[]);
+        compute_pass.set_bind_group(3, self.reprojection_data.bind_group(), &[]);
         compute_pass.set_pipeline(&self.pipeline);
         compute_pass.dispatch_workgroups(
             self.extent.width / Self::PIXELS_PER_COMPUTE_AXIS + 1,
@@ -697,10 +694,9 @@ impl TemporalSmoothing {
         std::mem::swap(display.depth_texture_mut(), &mut self.accu_depth);
     }
 
-    pub fn set_accu_camera(&mut self, camera: &UniformBuffer<CameraUniform>) {
-        let uniform = camera.data();
-        let self_uniform = self.accu_frame_transformation.as_mut();
-        self_uniform.value = uniform.proj_matrix * uniform.view_matrix;
+    pub fn set_accu_camera(&mut self, camera: &UniformBuffer<CameraUniform>, queue: &wgpu::Queue) {
+        self.reprojection_data.as_mut().set_current_camera(camera);
+        self.reprojection_data.sync(queue);
     }
 
     pub fn rewrite_bind_group(
@@ -716,8 +712,7 @@ impl TemporalSmoothing {
             &self.accu_frame,
             &self.accu_depth,
             output_texture,
-            output_depth,
-            &self.accu_frame_transformation);
+            output_depth);
     }
 
     fn build_bind_group(
@@ -728,7 +723,6 @@ impl TemporalSmoothing {
         accu_depth: &wgpu::TextureView,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
-        accu_trafo: &UniformBuffer<MatrixWrapper>,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("render target bind group of tempsmooth"),
@@ -758,10 +752,6 @@ impl TemporalSmoothing {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(output_depth),
                 },
-                wgpu::BindGroupEntry {
-                    binding: 6,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: accu_trafo.buffer(), offset: 0, size: None }),
-                },
             ],
         })
     }
@@ -775,7 +765,7 @@ impl TemporalSmoothing {
         output_depth: &wgpu::TextureView,
     ) {
         let (c, cd, a, ad, bind_group) =
-            Self::create_render_target(device, width, height, output_texture, output_depth, &self.accu_frame_transformation);
+            Self::create_render_target(device, width, height, output_texture, output_depth);
         self.bind_group = bind_group;
         self.accu_frame = a;
         self.accu_depth = ad;
