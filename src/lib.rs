@@ -506,6 +506,9 @@ impl WindowContext {
         self.stopwatch.as_mut().map(|s| s.end(&mut encoder));
         self.wgpu_context.queue.submit([encoder.finish()]);
 
+        // set the accumulation frame's camera to this frame's camera
+        self.temp_smoother.set_accu_camera(self.renderer.camera());
+
         if self.ui_visible {
             // ui rendering
             self.ui_renderer.begin_frame(&self.window);
@@ -527,7 +530,6 @@ impl WindowContext {
         }
 
         output.present();
-        self.temp_smoother.set_accu_camera(self.renderer.camera());
         Ok(())
     }
 

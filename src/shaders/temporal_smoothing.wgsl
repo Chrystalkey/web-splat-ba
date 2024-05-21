@@ -7,6 +7,7 @@ struct CameraUniforms {
     viewport: vec2<f32>,
     focal: vec2<f32>
 };
+
 struct RenderSettings {
     clipping_box_min: vec4<f32>,
     clipping_box_max: vec4<f32>,
@@ -19,9 +20,10 @@ struct RenderSettings {
     scene_extend: f32,
     current_colour_weight: f32, // could be interesting to have this as a ui parameter
     center: vec3<f32>,
-}
+};
+
 struct MatrixWrapper {
-    matrix: mat4x4<f32>,
+    value: mat4x4<f32>,
 };
 
 struct VertexOut {
@@ -53,25 +55,37 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let tex_dims = textureDimensions(currentFrameTexture); // assumes all texture have the same dimensions
     let current_position = pixel_coordinate;
     let current_colour = textureLoad(currentFrameTexture, current_position, 0);
+    // divided by current alpha cause simon said so
     let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0), 0.) / current_colour.a;
-
-    let current_v4_pos = vec4<f32>(vec2<f32>(current_position) / camera.viewport, 1., current_depth.x);
+    // ndc
+    let current_v4_pos = vec4<f32>((vec2<f32>(current_position)/camera.viewport * 2) - vec2<f32>(1.,1.), 1., current_depth.x);
+    // 0..1
+    // let current_v4_pos = vec4<f32>(vec2<f32>(current_position)/camera.viewport, 1., current_depth.x);
+    // without changes
+    // let current_v4_pos = vec4<f32>(vec2<f32>(current_position), 1., current_depth.x);
     let reprojected_pos = reproject_position(
         current_v4_pos,
-        accu_vp.matrix,
-        camera.view_inv * camera.proj_inv
+        accu_vp.value,
+        camera.view_inv*camera.proj_inv
     );
-    let reproj_pos = vec2<u32>(reprojected_pos.xy);
+    // ndc
+    let reproj_pos = (reprojected_pos.xy+vec2<f32>(1.,1.))/2.*camera.viewport;
 
+    // 0..1
+    //let reproj_pos = reprojected_pos.xy*camera.viewport;
 
-    let accu_colour = textureLoad(accuTexture, reproj_pos);
-    let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
+    // unchanged
+    // let reproj_pos = reprojected_pos.xy;
 
     var final_colour = current_colour;
-    if abs(accu_depth.x - current_depth.x) > EPSILON {
+    if  reproj_pos.x >= 0 && reproj_pos.x < camera.viewport.x &&
+        reproj_pos.y >= 0 && reproj_pos.y < camera.viewport.y {
+        let reproj_pos = vec2<u32>(reproj_pos);
+        let accu_colour = textureLoad(accuTexture, reproj_pos);
+        let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
         final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
     }
-    
+
     // write the texture points into the receiving buffer
     textureStore(dstTexture, current_position, final_colour);
     textureStore(dstDepth, current_position, vec4<f32>(current_depth.x, 0., 0., 0.));

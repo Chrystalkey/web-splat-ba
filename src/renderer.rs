@@ -420,12 +420,12 @@ impl PreprocessPipeline {
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct MatrixWrapper {
-    matrix: Matrix4<f32>,
+    value: Matrix4<f32>,
 }
 impl Default for MatrixWrapper{
     fn default() -> Self {
         Self {
-            matrix: Matrix4::identity(),
+            value: Matrix4::identity(),
         }
     }
 
@@ -699,7 +699,7 @@ impl TemporalSmoothing {
     pub fn set_accu_camera(&mut self, camera: &UniformBuffer<CameraUniform>) {
         let uniform = camera.data();
         let self_uniform = self.accu_frame_transformation.as_mut();
-        self_uniform.matrix = uniform.proj_matrix * uniform.view_matrix;
+        self_uniform.value =  uniform.proj_matrix * uniform.view_matrix;
     }
     pub fn rewrite_bind_group(
         &mut self,
