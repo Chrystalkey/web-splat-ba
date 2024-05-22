@@ -78,7 +78,7 @@ impl GaussianRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Always,
+                depth_compare: wgpu::CompareFunction::LessEqual,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),

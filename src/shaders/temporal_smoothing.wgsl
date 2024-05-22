@@ -62,23 +62,18 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
 
     // ndc
     let reproj_pos = ((reprojected_pos / reprojected_pos.w).xy + vec2(1., 1.))  * tex_dims /2.;
-    // I have honestly not the faintest Idea why the transformation is so terribly skewed. It is rotated wrongly,
-    // scaled wrongly and to make matters worse it is even projected wrongly.
-    // Ideas as to what the problem is:
-    // - coordinate system is somehow wrong (flipped axis or not ndc or whatever)
-    // - some uniform buffer is not being updated and only part of the transformation is actually "recent" (do I need to manually sync the accu_vp?)
-    // - the ordering of the arguments is wrong (depth on third or on fourth component?)
-    // - the depth value is somehow wrong (divided by alpha or not or somehow even more different)
+    // the reason for previous confusion was: I forgot that clip space exists :facepalm:
 
     var final_colour = current_colour;
     if  (reproj_pos.x >= 0 && reproj_pos.x < tex_dims.x &&
          reproj_pos.y >= 0 && reproj_pos.y < tex_dims.y) {
-        let reproj_pos = vec2<u32>(reproj_pos);
+        let reproj_pos = vec2<u32>(u32(reproj_pos.x), u32(tex_dims.y-reproj_pos.y));
         let accu_colour = textureLoad(accuTexture, reproj_pos);
         let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
-        //final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
-        final_colour = vec4<f32>(.8,0,0,1);
+        final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
+        // final_colour = vec4<f32>(.8,0,0,1);
     }
+    final_colour = clamp(vec4<f32>(vec3(current_depth.x), 1), vec4(0.), vec4(1.));
 
     // write the texture points into the receiving buffer
     textureStore(dstTexture, current_position, final_colour);
