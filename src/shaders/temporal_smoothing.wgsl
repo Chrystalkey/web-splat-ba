@@ -30,7 +30,7 @@ struct ReprojectionData {
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
 
 @group(1) @binding(0) var currentFrameTexture: texture_2d<f32>;
-@group(1) @binding(1) var currentFrameDepthTexture: texture_depth_2d;
+@group(1) @binding(1) var currentFrameDepthTexture: texture_2d<f32>;
 
 @group(1) @binding(2) var accuTexture: texture_storage_2d<rgba16float, read_write>;
 @group(1) @binding(3) var accuDepth: texture_storage_2d<r32float, read_write>;
@@ -41,14 +41,14 @@ struct ReprojectionData {
 @group(2) @binding(0) var<uniform> render_settings: RenderSettings;
 @group(3) @binding(0) var<uniform> reprojection_data: ReprojectionData;
 
-const EPSILON = 1e-3;
+const EPSILON = 1e-5;
 
 fn smooth_out_at(pixel_coordinate: vec2u) {
     let tex_dims = vec2<f32>(textureDimensions(currentFrameTexture).xy); // assumes all texture have the same dimensions
     let current_position = pixel_coordinate;
-    let current_colour = textureLoad(currentFrameTexture, current_position, 0) ;
-    // divided by current alpha cause simon said so
-    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0), 0.)/ current_colour.a;
+    let current_colour = textureLoad(currentFrameTexture, current_position, 0);
+
+    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0).r, 0.)/(current_colour.a+EPSILON);
 
     // ndc
     let current_v4_pos_ndc = vec4<f32>(
@@ -71,9 +71,9 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
         let accu_colour = textureLoad(accuTexture, reproj_pos);
         let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
         final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
-        // final_colour = vec4<f32>(.8,0,0,1);
+        //final_colour = vec4<f32>(.8,0,0,1);
     }
-    final_colour = clamp(vec4<f32>(vec3(current_depth.x), 1), vec4(0.), vec4(1.));
+    //final_colour = clamp(vec4<f32>(vec3(current_depth.x), 1), vec4(0.), vec4(1.));
 
     // write the texture points into the receiving buffer
     textureStore(dstTexture, current_position, final_colour);

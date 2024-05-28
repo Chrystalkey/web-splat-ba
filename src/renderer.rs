@@ -64,7 +64,13 @@ impl GaussianRenderer {
                     format: color_format,
                     blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
-                })],
+                }),
+                Some(wgpu::ColorTargetState {
+                    format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+                ],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -75,13 +81,7 @@ impl GaussianRenderer {
                 unclipped_depth: false,
                 conservative: false,
             },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
+            depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
         });
@@ -459,7 +459,7 @@ pub struct TemporalSmoothing {
 impl TemporalSmoothing {
     pub const OUT_TEXTURE_FORMAT_COL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
     pub const OUT_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
-    pub const IN_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+    pub const IN_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
     pub const PIXELS_PER_COMPUTE_AXIS: u32 = 4;
     pub const CURRENT_COLOUR_WEIGHT: f32 = 0.1;
 
@@ -489,7 +489,7 @@ impl TemporalSmoothing {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },

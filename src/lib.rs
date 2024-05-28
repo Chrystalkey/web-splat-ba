@@ -92,12 +92,12 @@ impl WGPUContext {
         let adapter = wgpu::util::initialize_adapter_from_env_or_default(instance, surface)
             .await
             .unwrap();
-        log::info!("using {}",adapter.get_info().name);
+        log::info!("using {}", adapter.get_info().name);
 
         #[cfg(target_arch = "wasm32")]
-            let required_features = wgpu::Features::default();
+        let required_features = wgpu::Features::default();
         #[cfg(not(target_arch = "wasm32"))]
-            let required_features = wgpu::Features::TIMESTAMP_QUERY
+        let required_features = wgpu::Features::TIMESTAMP_QUERY
             | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
             | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
 
@@ -231,9 +231,14 @@ impl WindowContext {
         let pc = PointCloud::new(&device, pc_raw)?;
         log::info!("loaded point cloud with {:} points", pc.num_points());
 
-        let renderer =
-            GaussianRenderer::new(&device, &queue, TemporalSmoothing::OUT_TEXTURE_FORMAT_COL, pc.sh_deg(), pc.compressed())
-                .await;
+        let renderer = GaussianRenderer::new(
+            &device,
+            &queue,
+            TemporalSmoothing::OUT_TEXTURE_FORMAT_COL,
+            pc.sh_deg(),
+            pc.compressed(),
+        )
+        .await;
 
         let aabb = pc.bbox();
         let aspect = size.width as f32 / size.height as f32;
@@ -259,11 +264,13 @@ impl WindowContext {
             size.width,
             size.height,
         );
-        let temp_smoother: TemporalSmoothing = TemporalSmoothing::new(device,
-                                                                      display.texture(),
-                                                                      display.depth_texture(),
-                                                                      size.width, size.height);
-
+        let temp_smoother: TemporalSmoothing = TemporalSmoothing::new(
+            device,
+            display.texture(),
+            display.depth_texture(),
+            size.width,
+            size.height,
+        );
 
         let stopwatch = if cfg!(not(target_arch = "wasm32")) {
             Some(GPUStopwatch::new(device, Some(4)))
@@ -344,15 +351,21 @@ impl WindowContext {
                 .configure(&self.wgpu_context.device, &self.config);
             self.display
                 .resize(&self.wgpu_context.device, new_size.width, new_size.height);
-            self.temp_smoother
-                .resize(&self.wgpu_context.device, new_size.width, new_size.height,
-                        self.display.texture(), &self.display.depth_texture());
+            self.temp_smoother.resize(
+                &self.wgpu_context.device,
+                new_size.width,
+                new_size.height,
+                self.display.texture(),
+                &self.display.depth_texture(),
+            );
             self.splatting_args
                 .camera
                 .projection
                 .resize(new_size.width, new_size.height);
             self.splatting_args.viewport = Vector2::new(new_size.width, new_size.height);
-            self.splatting_args.camera.projection
+            self.splatting_args
+                .camera
+                .projection
                 .resize(new_size.width, new_size.height);
         }
         if let Some(scale_factor) = scale_factor {
@@ -372,7 +385,10 @@ impl WindowContext {
             } else {
                 let dt = if *playing { dt } else { Duration::ZERO };
                 self.splatting_args.camera = next_camera.update(dt);
-                self.splatting_args.camera.projection.resize(self.config.width, self.config.height);
+                self.splatting_args
+                    .camera
+                    .projection
+                    .resize(self.config.width, self.config.height);
                 if next_camera.done() {
                     self.animation.take();
                     self.controller.reset_to_camera(self.splatting_args.camera);
@@ -429,7 +445,8 @@ impl WindowContext {
         // do prepare stuff
 
         // set the accumulation frame's camera to this frame's camera
-        self.temp_smoother.set_accu_camera(self.renderer.camera(), &self.wgpu_context.queue);
+        self.temp_smoother
+            .set_accu_camera(self.renderer.camera(), &self.wgpu_context.queue);
 
         let mut encoder =
             self.wgpu_context
@@ -462,32 +479,45 @@ impl WindowContext {
             // swap textures & recreate bind groups on both sides
             self.temp_smoother.swap_framebuffers(&mut self.display);
             self.display.rewrite_bind_group(&self.wgpu_context.device);
-            self.temp_smoother.rewrite_bind_group(&self.wgpu_context.device, self.display.texture(), self.display.depth_texture());
+            self.temp_smoother.rewrite_bind_group(
+                &self.wgpu_context.device,
+                self.display.texture(),
+                self.display.depth_texture(),
+            );
 
             // and now the main render pass
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: self.temp_smoother.texture(),
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: self.background_color.r() as f64 / 255.,
-                            g: self.background_color.g() as f64 / 255.,
-                            b: self.background_color.b() as f64 / 255.,
-                            a: 1.,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: self.temp_smoother.depth_texture(),
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.),
-                        store: wgpu::StoreOp::Store,
+                color_attachments: &[
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: self.temp_smoother.texture(),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: self.background_color.r() as f64 / 255.,
+                                g: self.background_color.g() as f64 / 255.,
+                                b: self.background_color.b() as f64 / 255.,
+                                a: 1.,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
                     }),
-                    stencil_ops: None,
-                }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: self.temp_smoother.depth_texture(),
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(
+                                wgpu::Color{
+                                    r: 0.,
+                                    g: 0.,
+                                    b: 0.,
+                                    a: 1.,
+                                }
+                            ),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
                 ..Default::default()
             });
 
@@ -497,8 +527,12 @@ impl WindowContext {
             stopwatch.stop(&mut encoder, "rasterization").unwrap();
             stopwatch.start(&mut encoder, "smoothing").unwrap();
         }
-        // has no texture passed as input, because the textures are swapped in between render passes above  
-        self.temp_smoother.render(&mut encoder, self.renderer.camera(), self.renderer.render_settings());
+        // has no texture passed as input, because the textures are swapped in between render passes above
+        self.temp_smoother.render(
+            &mut encoder,
+            self.renderer.camera(),
+            self.renderer.render_settings(),
+        );
         if let Some(stopwatch) = &mut self.stopwatch {
             stopwatch.stop(&mut encoder, "smoothing").unwrap();
         }
@@ -660,7 +694,10 @@ impl WindowContext {
 
     fn update_camera(&mut self, camera: PerspectiveCamera) {
         self.splatting_args.camera = camera;
-        self.splatting_args.camera.projection.resize(self.config.width, self.config.height);
+        self.splatting_args
+            .camera
+            .projection
+            .resize(self.config.width, self.config.height);
     }
 
     fn save_view(&mut self) {
@@ -892,7 +929,12 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub async fn run_wasm(pc: Vec<u8>, scene: Option<Vec<u8>>, pc_file: Option<String>, scene_file: Option<String>) {
+pub async fn run_wasm(
+    pc: Vec<u8>,
+    scene: Option<Vec<u8>>,
+    pc_file: Option<String>,
+    scene_file: Option<String>,
+) {
     use std::{io::Cursor, str::FromStr};
 
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
@@ -903,7 +945,11 @@ pub async fn run_wasm(pc: Vec<u8>, scene: Option<Vec<u8>>, pc_file: Option<Strin
     wasm_bindgen_futures::spawn_local(open_window(
         pc_reader,
         scene_reader,
-        RenderConfig { no_vsync: false, skybox: None, hdr: false },
+        RenderConfig {
+            no_vsync: false,
+            skybox: None,
+            hdr: false,
+        },
         pc_file.and_then(|s| PathBuf::from_str(s.as_str()).ok()),
         scene_file.and_then(|s| PathBuf::from_str(s.as_str()).ok()),
     ));
