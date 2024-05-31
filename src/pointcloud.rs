@@ -337,6 +337,7 @@ impl PointCloud {
 pub struct Splat {
     pub v: Vector4<f16>,
     pub pos: Vector2<f16>,
+    pub depth: f32,
     pub color: Vector4<f16>,
 }
 

@@ -5,6 +5,7 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) screen_pos: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) depth: f32,
 };
 
 struct VertexInput {
@@ -18,6 +19,8 @@ struct Splat {
     v_0: u32, v_1: u32,
     // 2x f16 packed as u32
     pos: u32,
+    // depth as plain f32
+    depth: f32,
     // rgba packed as f16
     color_0: u32,color_1: u32,
 };
@@ -58,6 +61,7 @@ fn vs_main(
     out.position = vec4<f32>(v_center + offset, 0., 1.);
     out.screen_pos = position;
     out.color = vec4<f32>(unpack2x16float(vertex.color_0), unpack2x16float(vertex.color_1));
+    out.depth = vertex.depth;
     return out;
 }
 
@@ -69,9 +73,7 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     }
     let b = min(0.99, exp(-a) * in.color.a);
      
-    // add depth channel in input
-    // add depth texture into frag output 
     // depth calc like in depth branch
     // feed that into the reprojection shader
-    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, vec4<f32>(1, 0, 0, 1));
+    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, vec4<f32>(in.depth/100.*b, 0, 0, b));
 }
