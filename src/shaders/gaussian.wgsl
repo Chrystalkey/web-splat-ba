@@ -75,5 +75,6 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
      
     // depth calc like in depth branch
     // feed that into the reprojection shader
-    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, vec4<f32>(in.depth/100.*b, 0, 0, b));
+
+    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, vec4<f32>(in.depth*b, 0, 0, b));
 }
