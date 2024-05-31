@@ -267,12 +267,8 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let v = vec4<f32>(v1 / viewport, v2 / viewport);
     points_2d[store_idx] = Splat(
         pack2x16float(v.xy), pack2x16float(v.zw),
-<<<<<<< HEAD
-        pack2x16float(v_center.xy), pos2d.z,
-=======
         pack2x16float(v_center.xy), 
         pos2d.z,
->>>>>>> 2d47efe (added depth to the the pipeline)
         pack2x16float(color.rg), pack2x16float(color.ba),
     );
     // filling the sorting buffers and the indirect sort dispatch buffer
