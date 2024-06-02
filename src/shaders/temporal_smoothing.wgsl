@@ -48,7 +48,7 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let current_position = pixel_coordinate;
     let current_colour = textureLoad(currentFrameTexture, current_position, 0);
 
-    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0).r, 0.)/(current_colour.a+EPSILON);
+    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0).r, 0.) / (current_colour.a+EPSILON);
 
     // ndc
     let current_v4_pos_ndc = vec4<f32>(
@@ -73,7 +73,7 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
         final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
         //final_colour = vec4<f32>(.8,0,0,1);
     }
-    //final_colour = clamp(vec4<f32>(vec3(current_depth.x), 1), vec4(0.), vec4(1.));
+    //final_colour = clamp(vec4<f32>(vec3(current_depth.x)/100., 1), vec4(0.), vec4(1.));
 
     // write the texture points into the receiving buffer
     textureStore(dstTexture, current_position, final_colour);
