@@ -60,16 +60,17 @@ impl GaussianRenderer {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                }),
-                Some(wgpu::ColorTargetState {
-                    format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                }),
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
+                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
                 ],
             }),
             primitive: wgpu::PrimitiveState {
@@ -416,27 +417,26 @@ impl PreprocessPipeline {
     }
 }
 
-
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct ReprojectionData {
     vp_accu: Matrix4<f32>,
     reprojection: Matrix4<f32>,
 }
-impl ReprojectionData{
-    fn set_current_camera(&mut self, camera: &UniformBuffer<CameraUniform>){
-        self.reprojection = self.vp_accu * camera.data().view_inv_matrix*camera.data().proj_inv_matrix;
-        self.vp_accu = camera.data().proj_matrix*camera.data().view_matrix;
+impl ReprojectionData {
+    fn set_current_camera(&mut self, camera: &UniformBuffer<CameraUniform>) {
+        self.reprojection =
+            self.vp_accu * camera.data().view_inv_matrix * camera.data().proj_inv_matrix;
+        self.vp_accu = camera.data().proj_matrix * camera.data().view_matrix;
     }
 }
-impl Default for ReprojectionData{
+impl Default for ReprojectionData {
     fn default() -> Self {
         Self {
             vp_accu: Matrix4::identity(),
             reprojection: Matrix4::identity(),
         }
     }
-
 }
 /// Contains everything for the temporal smoothing in-between pass. The pass starts by taking the
 /// currently rendered frame without post-processing, smoothing over pixels with data from
@@ -446,6 +446,8 @@ pub struct TemporalSmoothing {
     bind_group: wgpu::BindGroup,
 
     extent: wgpu::Extent3d,
+
+    sampler: wgpu::Sampler,
     // frame buffer for the accumulation buffer
     accu_frame: wgpu::TextureView,
     accu_depth: wgpu::TextureView,
@@ -489,7 +491,7 @@ impl TemporalSmoothing {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
                     },
@@ -539,6 +541,13 @@ impl TemporalSmoothing {
                     },
                     count: None,
                 },
+                // depth map sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 6,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         })
     }
@@ -556,7 +565,7 @@ impl TemporalSmoothing {
                 &UniformBuffer::<CameraUniform>::bind_group_layout(device),
                 &Self::bind_group_layout(device),
                 &UniformBuffer::<SplattingArgsUniform>::bind_group_layout(device),
-                &UniformBuffer::<ReprojectionData>::bind_group_layout(device)
+                &UniformBuffer::<ReprojectionData>::bind_group_layout(device),
             ],
             push_constant_ranges: &[],
         });
@@ -568,8 +577,9 @@ impl TemporalSmoothing {
             module: &shader,
             entry_point: "cs_main",
         });
-        let reprojection_data = UniformBuffer::new_default(device, Some("accu frame transformation"));
-        let (current_frame, current_depth, accu_frame, accu_depth, bind_group) =
+        let reprojection_data =
+            UniformBuffer::new_default(device, Some("accu frame transformation"));
+        let (current_frame, current_depth, accu_frame, accu_depth, sampler, bind_group) =
             Self::create_render_target(device, width, height, output_texture, output_depth);
 
         Self {
@@ -580,6 +590,7 @@ impl TemporalSmoothing {
                 height,
                 depth_or_array_layers: 1,
             },
+            sampler,
             current_frame,
             current_depth,
             accu_frame,
@@ -599,6 +610,7 @@ impl TemporalSmoothing {
         wgpu::TextureView,
         wgpu::TextureView,
         wgpu::TextureView,
+        wgpu::Sampler,
         wgpu::BindGroup,
     ) {
         let extent = Extent3d {
@@ -655,16 +667,25 @@ impl TemporalSmoothing {
         });
         let acd_view = accu_depth.create_view(&Default::default());
 
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("tempsmooth filtering sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
         let bind_group = Self::build_bind_group(
             device,
             &cf_view,
             &cfd_view,
             &ac_view,
             &acd_view,
+            &sampler,
             output_texture,
-            output_depth
+            output_depth,
         );
-        return (cf_view, cfd_view, ac_view, acd_view, bind_group);
+
+        return (cf_view, cfd_view, ac_view, acd_view, sampler, bind_group);
     }
 
     pub fn render(
@@ -711,8 +732,10 @@ impl TemporalSmoothing {
             &self.current_depth,
             &self.accu_frame,
             &self.accu_depth,
+            &self.sampler,
             output_texture,
-            output_depth);
+            output_depth,
+        );
     }
 
     fn build_bind_group(
@@ -721,6 +744,7 @@ impl TemporalSmoothing {
         current_depth: &wgpu::TextureView,
         accu_frame: &wgpu::TextureView,
         accu_depth: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
     ) -> wgpu::BindGroup {
@@ -752,6 +776,10 @@ impl TemporalSmoothing {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(output_depth),
                 },
+                wgpu::BindGroupEntry{
+                    binding: 6,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                }
             ],
         })
     }
@@ -764,7 +792,7 @@ impl TemporalSmoothing {
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
     ) {
-        let (c, cd, a, ad, bind_group) =
+        let (c, cd, a, ad, s, bind_group) =
             Self::create_render_target(device, width, height, output_texture, output_depth);
         self.bind_group = bind_group;
         self.accu_frame = a;
@@ -776,6 +804,7 @@ impl TemporalSmoothing {
             height,
             depth_or_array_layers: 1,
         };
+        self.sampler = s;
     }
 }
 
@@ -1140,7 +1169,7 @@ pub struct SplattingArgsUniform {
     kernel_size: f32,
     walltime: f32,
     scene_extend: f32,
-    
+
     current_coulour_weight: f32,
 
     scene_center: Vector4<f32>,

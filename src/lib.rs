@@ -99,7 +99,8 @@ impl WGPUContext {
         #[cfg(not(target_arch = "wasm32"))]
         let required_features = wgpu::Features::TIMESTAMP_QUERY
             | wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
-            | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+            | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+            | wgpu::Features::FLOAT32_FILTERABLE;
 
         let (device, queue) = adapter
             .request_device(

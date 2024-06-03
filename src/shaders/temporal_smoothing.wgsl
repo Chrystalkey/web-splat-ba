@@ -29,6 +29,14 @@ struct ReprojectionData {
 
 @group(0) @binding(0) var<uniform> camera: CameraUniforms;
 
+// add float32 to required features in device creation
+// add sampler to bind group here
+// sample with https://www.w3.org/TR/WGSL/#texturesamplelevel and mip lvl 0
+
+// reprojection verify on the cpu
+
+// variance calculation in two passes or with a mutex
+
 @group(1) @binding(0) var currentFrameTexture: texture_2d<f32>;
 @group(1) @binding(1) var currentFrameDepthTexture: texture_2d<f32>;
 
@@ -38,25 +46,30 @@ struct ReprojectionData {
 @group(1) @binding(4) var dstTexture: texture_storage_2d<rgba16float, read_write>;
 @group(1) @binding(5) var dstDepth: texture_storage_2d<r32float, read_write>;
 
+@group(1) @binding(6) var filter_sampler: sampler;
+
 @group(2) @binding(0) var<uniform> render_settings: RenderSettings;
 @group(3) @binding(0) var<uniform> reprojection_data: ReprojectionData;
 
-const EPSILON = 1e-5;
+const EPSILON = 1e-2;
 
 fn smooth_out_at(pixel_coordinate: vec2u) {
     let tex_dims = vec2<f32>(textureDimensions(currentFrameTexture).xy); // assumes all texture have the same dimensions
     let current_position = pixel_coordinate;
-    let current_colour = textureLoad(currentFrameTexture, current_position, 0);
+    let current_normalized_position = vec2<f32>(current_position) / tex_dims;
 
-    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0).r, 0.) / (current_colour.a + EPSILON);
+    let current_colour = textureSampleLevel(currentFrameTexture,filter_sampler, current_normalized_position, 0.);
+    let current_depth = textureSampleLevel(currentFrameDepthTexture,filter_sampler, current_normalized_position, 0.).r / (current_colour.a + EPSILON);
+
+    //let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0).r, 0.) / (current_colour.a + EPSILON);
 
     // ndc
     let current_v4_pos_ndc = vec4<f32>(
         (vec2<f32>(current_position) / tex_dims * 2) - vec2<f32>(1., 1.),
-        current_depth.x,
+        current_depth,
         1.
     );
-    let current_pos_clip = current_v4_pos_ndc / current_depth.x;
+    let current_pos_clip = current_v4_pos_ndc / current_depth;
 
     let reprojected_pos = reprojection_data.reprojection * current_pos_clip;
 
@@ -69,16 +82,19 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
         let reproj_pos = vec2<u32>(u32(reproj_pos.x), u32(tex_dims.y - reproj_pos.y)); // flip y axis for reasons 
         let accu_colour = textureLoad(accuTexture, reproj_pos);
         let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
-        if abs(accu_depth.x - current_depth.x) > EPSILON {
+
+        // smooth out depth difference (or check for greater than)
+        if abs(accu_depth.x - current_depth) > EPSILON {
+            // weigh by per-pixel information (colour diff, depth diff, depth variance)
             final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
         }
         //final_colour = vec4<f32>(.8,0,0,1);
     }
-    //final_colour = clamp(vec4<f32>(vec3(current_depth.x)/100., 1), vec4(0.), vec4(1.));
+    final_colour = clamp(vec4<f32>(vec3(current_depth)/100., 1), vec4(0.), vec4(1.));
 
     // write the texture points into the receiving buffer
     textureStore(dstTexture, current_position, final_colour);
-    textureStore(dstDepth, current_position, vec4<f32>(current_depth.x, 0., 0., 0.));
+    textureStore(dstDepth, current_position, vec4<f32>(current_depth, 0., 0., 0.));
 }
 
 @compute @workgroup_size(1)
