@@ -25,7 +25,7 @@ struct Splat {
     color_0: u32,color_1: u32,
 };
 
-struct FragmentOut{
+struct FragmentOut {
     @location(0) color: vec4<f32>,
     @location(1) depth: vec4<f32>,
 };
@@ -73,5 +73,5 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     }
     let b = min(0.99, exp(-a) * in.color.a);
 
-    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, vec4<f32>(in.depth*b, 0, 0, b));
+    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, vec4<f32>(in.depth * b, 0, 0, b));
 }

@@ -48,11 +48,11 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let current_position = pixel_coordinate;
     let current_colour = textureLoad(currentFrameTexture, current_position, 0);
 
-    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0).r, 0.) / (current_colour.a+EPSILON);
+    let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0).r, 0.) / (current_colour.a + EPSILON);
 
     // ndc
     let current_v4_pos_ndc = vec4<f32>(
-        (vec2<f32>(current_position)/tex_dims * 2) - vec2<f32>(1., 1.),
+        (vec2<f32>(current_position) / tex_dims * 2) - vec2<f32>(1., 1.),
         current_depth.x,
         1.
     );
@@ -61,16 +61,17 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let reprojected_pos = reprojection_data.reprojection * current_pos_clip;
 
     // ndc
-    let reproj_pos = ((reprojected_pos / reprojected_pos.w).xy + vec2(1., 1.))  * tex_dims /2.;
+    let reproj_pos = ((reprojected_pos / reprojected_pos.w).xy + vec2(1., 1.)) * tex_dims / 2.;
     // the reason for previous confusion was: I forgot that clip space exists :facepalm:
 
     var final_colour = current_colour;
-    if  (reproj_pos.x >= 0 && reproj_pos.x < tex_dims.x &&
-         reproj_pos.y >= 0 && reproj_pos.y < tex_dims.y) {
-        let reproj_pos = vec2<u32>(u32(reproj_pos.x), u32(tex_dims.y-reproj_pos.y));
+    if reproj_pos.x >= 0 && reproj_pos.x < tex_dims.x && reproj_pos.y >= 0 && reproj_pos.y < tex_dims.y {
+        let reproj_pos = vec2<u32>(u32(reproj_pos.x), u32(tex_dims.y - reproj_pos.y)); // flip y axis for reasons 
         let accu_colour = textureLoad(accuTexture, reproj_pos);
         let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
-        final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
+        if abs(accu_depth.x - current_depth.x) > EPSILON {
+            final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
+        }
         //final_colour = vec4<f32>(.8,0,0,1);
     }
     //final_colour = clamp(vec4<f32>(vec3(current_depth.x)/100., 1), vec4(0.), vec4(1.));
