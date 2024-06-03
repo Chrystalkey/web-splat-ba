@@ -90,7 +90,7 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
         }
         //final_colour = vec4<f32>(.8,0,0,1);
     }
-    final_colour = clamp(vec4<f32>(vec3(current_depth)/100., 1), vec4(0.), vec4(1.));
+    // final_colour = clamp(vec4<f32>(vec3(current_depth)/100., 1), vec4(0.), vec4(1.));
 
     // write the texture points into the receiving buffer
     textureStore(dstTexture, current_position, final_colour);
