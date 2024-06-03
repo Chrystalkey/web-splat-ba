@@ -51,17 +51,34 @@ struct ReprojectionData {
 @group(2) @binding(0) var<uniform> render_settings: RenderSettings;
 @group(3) @binding(0) var<uniform> reprojection_data: ReprojectionData;
 
-const EPSILON = 1e-2;
+const EPSILON = 1e-5;
+const DEPTH_SMOOTHING_HIGH = 1e-3;
+const COLOUR_SMOOTHING_HIGH = 1.;
+
+fn blend(c_col: vec4<f32>, c_depth: f32,
+    a_col: vec4<f32>, a_depth: f32) -> vec4<f32> {
+    let depth_diff = abs(a_depth - c_depth);
+
+    // smooth out depth difference, clamp between 0 and 1
+    // if depth difference is 0, the coefficient is 1, meaning the full weight is given to the current frame colour
+    let ddiff_coeff = 1. - clamp(smoothstep(0., DEPTH_SMOOTHING_HIGH, depth_diff), 0., 1.);
+
+    let colour_diff = distance(c_col.rgb, a_col.rgb);
+    let cdiff_coeff = clamp(smoothstep(0., COLOUR_SMOOTHING_HIGH, colour_diff), 0., 1.);
+
+    // now alpha blending is performed with the additional weight coming from the uniform variable
+    let ccol_weight = ddiff_coeff*cdiff_coeff;
+    return mix(a_col, c_col, ccol_weight * render_settings.current_colour_weight);
+}
 
 fn smooth_out_at(pixel_coordinate: vec2u) {
-    let tex_dims = vec2<f32>(textureDimensions(currentFrameTexture).xy); // assumes all texture have the same dimensions
+    let tex_dims_f = vec2<f32>(textureDimensions(currentFrameTexture).xy);
+    let tex_dims = vec2<f32>(tex_dims_f); // assumes all texture have the same dimensions
     let current_position = pixel_coordinate;
     let current_normalized_position = vec2<f32>(current_position) / tex_dims;
 
-    let current_colour = textureSampleLevel(currentFrameTexture,filter_sampler, current_normalized_position, 0.);
-    let current_depth = textureSampleLevel(currentFrameDepthTexture,filter_sampler, current_normalized_position, 0.).r / (current_colour.a + EPSILON);
-
-    //let current_depth = vec2<f32>(textureLoad(currentFrameDepthTexture, current_position, 0).r, 0.) / (current_colour.a + EPSILON);
+    let current_colour = textureSampleLevel(currentFrameTexture, filter_sampler, current_normalized_position, 0.);
+    let current_depth = textureSampleLevel(currentFrameDepthTexture, filter_sampler, current_normalized_position, 0.).r / (current_colour.a + EPSILON);
 
     // ndc
     let current_v4_pos_ndc = vec4<f32>(
@@ -81,18 +98,11 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     if reproj_pos.x >= 0 && reproj_pos.x < tex_dims.x && reproj_pos.y >= 0 && reproj_pos.y < tex_dims.y {
         let reproj_pos = vec2<u32>(u32(reproj_pos.x), u32(tex_dims.y - reproj_pos.y)); // flip y axis for reasons 
         let accu_colour = textureLoad(accuTexture, reproj_pos);
-        let accu_depth = vec2<f32>(textureLoad(accuDepth, reproj_pos.xy).x, 0.);
-
-        // smooth out depth difference (or check for greater than)
-        if abs(accu_depth.x - current_depth) > EPSILON {
-            // weigh by per-pixel information (colour diff, depth diff, depth variance)
-            final_colour = current_colour * render_settings.current_colour_weight + accu_colour * (1. - render_settings.current_colour_weight);
-        }
-        //final_colour = vec4<f32>(.8,0,0,1);
+        let accu_depth = textureLoad(accuDepth, reproj_pos).r;// here the alpha is pre-filtered out, in contrast to the current depth
+        final_colour = blend(current_colour, current_depth, accu_colour, accu_depth);
     }
-    // final_colour = clamp(vec4<f32>(vec3(current_depth)/100., 1), vec4(0.), vec4(1.));
 
-    // write the texture points into the receiving buffer
+    // write the texture points into the receiving buffers
     textureStore(dstTexture, current_position, final_colour);
     textureStore(dstDepth, current_position, vec4<f32>(current_depth, 0., 0., 0.));
 }
