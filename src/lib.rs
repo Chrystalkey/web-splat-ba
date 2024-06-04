@@ -299,6 +299,8 @@ impl WindowContext {
                 scene_center: None,
                 scene_extend: None,
                 current_colour_weight: TemporalSmoothing::CURRENT_COLOUR_WEIGHT,
+                colour_smoothing_high: TemporalSmoothing::COLOUR_SMOOTHING_HIGH,
+                depth_smoothing_high: TemporalSmoothing::DEPTH_SMOOTHING_HIGH,
             },
             pc,
             // camera: view_camera,

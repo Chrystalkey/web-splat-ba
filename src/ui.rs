@@ -129,6 +129,20 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         .speed(0.002),
                 );
                 ui.end_row();
+                ui.label("Depth Smoothing Cutoff");
+                ui.add_enabled(true,
+                    egui::DragValue::new(&mut state.splatting_args.depth_smoothing_high)
+                        .clamp_range(0.0..=10.0)
+                        .speed(0.0001),
+                );
+                ui.end_row();
+                ui.label("Color Smoothing Cutoff");
+                ui.add_enabled(true,
+                    egui::DragValue::new(&mut state.splatting_args.colour_smoothing_high)
+                        .clamp_range(0.0..=10.0)
+                        .speed(0.0001),
+                );
+                ui.end_row();
                 #[cfg(not(target_arch = "wasm32"))]
                 {
                     ui.label("Dilation Kernel Size");

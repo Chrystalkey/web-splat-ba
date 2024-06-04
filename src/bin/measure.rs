@@ -69,6 +69,8 @@ async fn render_views(
             scene_center: None,
             scene_extend: None,
             current_colour_weight: 1.,
+            colour_smoothing_high: 1.,
+            depth_smoothing_high: 1.,
         },
         &mut None,
     );
@@ -118,6 +120,8 @@ async fn render_views(
                     scene_center: None,
                     scene_extend: None,
                     current_colour_weight: 1.,
+                    colour_smoothing_high: 1.,
+                    depth_smoothing_high: 1.,
                 },
                 &mut None,
             );

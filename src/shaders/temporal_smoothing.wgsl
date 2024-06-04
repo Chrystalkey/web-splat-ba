@@ -19,6 +19,8 @@ struct RenderSettings {
     walltime: f32,
     scene_extend: f32,
     current_colour_weight: f32, // could be interesting to have this as a ui parameter
+    depth_smoothing_high: f32,
+    colour_smoothing_high: f32,
     center: vec3<f32>,
 };
 
@@ -40,8 +42,8 @@ struct ReprojectionData {
 @group(1) @binding(0) var currentFrameTexture: texture_2d<f32>;
 @group(1) @binding(1) var currentFrameDepthTexture: texture_2d<f32>;
 
-@group(1) @binding(2) var accuTexture: texture_storage_2d<rgba16float, read_write>;
-@group(1) @binding(3) var accuDepth: texture_storage_2d<r32float, read_write>;
+@group(1) @binding(2) var accuTexture: texture_2d<f32>;
+@group(1) @binding(3) var accuDepth: texture_2d<f32>;
 
 @group(1) @binding(4) var dstTexture: texture_storage_2d<rgba16float, read_write>;
 @group(1) @binding(5) var dstDepth: texture_storage_2d<r32float, read_write>;
@@ -52,8 +54,6 @@ struct ReprojectionData {
 @group(3) @binding(0) var<uniform> reprojection_data: ReprojectionData;
 
 const EPSILON = 1e-5;
-const DEPTH_SMOOTHING_HIGH = 1e-3;
-const COLOUR_SMOOTHING_HIGH = 1.;
 
 fn blend(c_col: vec4<f32>, c_depth: f32,
     a_col: vec4<f32>, a_depth: f32) -> vec4<f32> {
@@ -61,13 +61,13 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
 
     // smooth out depth difference, clamp between 0 and 1
     // if depth difference is 0, the coefficient is 1, meaning the full weight is given to the current frame colour
-    let ddiff_coeff = 1. - clamp(smoothstep(0., DEPTH_SMOOTHING_HIGH, depth_diff), 0., 1.);
+    let ddiff_coeff = 1. - clamp(smoothstep(0., render_settings.depth_smoothing_high, depth_diff), 0., 1.);
 
     let colour_diff = distance(c_col.rgb, a_col.rgb);
-    let cdiff_coeff = clamp(smoothstep(0., COLOUR_SMOOTHING_HIGH, colour_diff), 0., 1.);
+    let cdiff_coeff = clamp(smoothstep(0., render_settings.colour_smoothing_high, colour_diff), 0., 1.);
 
     // now alpha blending is performed with the additional weight coming from the uniform variable
-    let ccol_weight = ddiff_coeff*cdiff_coeff;
+    let ccol_weight = (ddiff_coeff +cdiff_coeff)/2.;
     return mix(a_col, c_col, ccol_weight * render_settings.current_colour_weight);
 }
 
@@ -96,9 +96,9 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
 
     var final_colour = current_colour;
     if reproj_pos.x >= 0 && reproj_pos.x < tex_dims.x && reproj_pos.y >= 0 && reproj_pos.y < tex_dims.y {
-        let reproj_pos = vec2<u32>(u32(reproj_pos.x), u32(tex_dims.y - reproj_pos.y)); // flip y axis for reasons 
-        let accu_colour = textureLoad(accuTexture, reproj_pos);
-        let accu_depth = textureLoad(accuDepth, reproj_pos).r;// here the alpha is pre-filtered out, in contrast to the current depth
+        let reproj_pos = vec2<f32>(reproj_pos.x, tex_dims.y - reproj_pos.y)/tex_dims_f; // flip y axis for reasons 
+        let accu_colour = textureSampleLevel(accuTexture, filter_sampler, reproj_pos, 0.);
+        let accu_depth = textureSampleLevel(accuDepth, filter_sampler, reproj_pos, 0.).r;// here the alpha is pre-filtered out, in contrast to the current depth
         final_colour = blend(current_colour, current_depth, accu_colour, accu_depth);
     }
 

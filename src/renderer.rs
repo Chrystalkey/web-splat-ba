@@ -464,6 +464,8 @@ impl TemporalSmoothing {
     pub const IN_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
     pub const PIXELS_PER_COMPUTE_AXIS: u32 = 4;
     pub const CURRENT_COLOUR_WEIGHT: f32 = 0.1;
+    pub const COLOUR_SMOOTHING_HIGH: f32= 1.;
+    pub const DEPTH_SMOOTHING_HIGH: f32= 1e-3;
 
     pub fn texture(&self) -> &wgpu::TextureView {
         &self.current_frame
@@ -501,10 +503,10 @@ impl TemporalSmoothing {
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::ReadWrite,
-                        format: TemporalSmoothing::OUT_TEXTURE_FORMAT_COL,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
                     count: None,
                 },
@@ -512,10 +514,10 @@ impl TemporalSmoothing {
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
                     visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::StorageTexture {
-                        access: wgpu::StorageTextureAccess::ReadWrite,
-                        format: TemporalSmoothing::OUT_TEXTURE_FORMAT_DEP,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
                     },
                     count: None,
                 },
@@ -1129,6 +1131,8 @@ pub struct SplattingArgs {
     pub scene_center: Option<Point3<f32>>,
     pub scene_extend: Option<f32>,
     pub current_colour_weight: f32,
+    pub depth_smoothing_high: f32,
+    pub colour_smoothing_high: f32,
 }
 
 impl Hash for SplattingArgs {
@@ -1171,6 +1175,9 @@ pub struct SplattingArgsUniform {
     scene_extend: f32,
 
     current_coulour_weight: f32,
+    depth_smoothing_high: f32,
+    colour_smoothing_high: f32,
+    _padding: [f32;2],
 
     scene_center: Vector4<f32>,
 }
@@ -1206,6 +1213,8 @@ impl SplattingArgsUniform {
                 .unwrap_or(pc.bbox().radius())
                 .max(pc.bbox().radius()),
             current_coulour_weight: args.current_colour_weight,
+            colour_smoothing_high: args.colour_smoothing_high,
+            depth_smoothing_high: args.depth_smoothing_high,
             ..Default::default()
         }
     }
@@ -1230,6 +1239,9 @@ impl Default for SplattingArgsUniform {
             scene_center: Vector4::new(0., 0., 0., 0.),
             scene_extend: 1.,
             current_coulour_weight: TemporalSmoothing::CURRENT_COLOUR_WEIGHT,
+            colour_smoothing_high: TemporalSmoothing::COLOUR_SMOOTHING_HIGH,
+            depth_smoothing_high: TemporalSmoothing::DEPTH_SMOOTHING_HIGH,
+            _padding: [0.; 2],
         }
     }
 }
