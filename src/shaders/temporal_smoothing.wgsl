@@ -56,7 +56,8 @@ struct ReprojectionData {
 const EPSILON = 1e-5;
 
 fn blend(c_col: vec4<f32>, c_depth: f32,
-    a_col: vec4<f32>, a_depth: f32) -> vec4<f32> {
+    a_col: vec4<f32>, a_depth: f32,
+    alpha: f32) -> vec4<f32> {
     let depth_diff = abs(a_depth - c_depth);
 
     // smooth out depth difference, clamp between 0 and 1
@@ -77,7 +78,8 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let current_normalized_position = vec2<f32>(current_position) / tex_dims_f;
 
     let current_colour = textureSampleLevel(currentFrameTexture, filter_sampler, current_normalized_position, 0.);
-    let current_depth = textureSampleLevel(currentFrameDepthTexture, filter_sampler, current_normalized_position, 0.).r / (current_colour.a + EPSILON);
+    let current_raw_depth = textureSampleLevel(currentFrameDepthTexture, filter_sampler, current_normalized_position, 0.);
+    let current_depth = current_raw_depth.r / (current_colour.a + EPSILON);
 
     // ndc
     let current_v4_pos_ndc = vec4<f32>(
@@ -99,7 +101,7 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     if reproj_pos.x >= 0 && reproj_pos.x < 1. && reproj_pos.y >= 0 && reproj_pos.y < 1. {
         let accu_colour = textureSampleLevel(accuTexture, filter_sampler, reproj_pos, 0.);
         let accu_depth = textureSampleLevel(accuDepth, filter_sampler, reproj_pos, 0.).r;// here the alpha is pre-filtered out, in contrast to the current depth
-        final_colour = blend(current_colour, current_depth, accu_colour, accu_depth);
+        final_colour = blend(current_colour, current_depth, accu_colour, accu_depth, current_raw_depth.g);
     }
 
     // write the texture points into the receiving buffers
