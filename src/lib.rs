@@ -505,26 +505,11 @@ impl WindowContext {
                             store: wgpu::StoreOp::Store,
                         },
                     }),
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: self.temp_smoother.depth_texture(),
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(
-                                wgpu::Color{
-                                    r: 0.,
-                                    g: 0.,
-                                    b: 0.,
-                                    a: 1.,
-                                }
-                            ),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
                 ],
                 ..Default::default()
             });
 
-            self.renderer.render(&mut render_pass, &self.pc);
+            self.renderer.render(&mut render_pass, &self.pc, &self.temp_smoother);
         }
         if let Some(stopwatch) = &mut self.stopwatch {
             stopwatch.stop(&mut encoder, "rasterization").unwrap();

@@ -11,6 +11,7 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::time::Duration;
 
+use wgpu::util::DeviceExt;
 use wgpu::{include_wgsl, Extent3d, MultisampleState};
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector4};
@@ -43,6 +44,7 @@ impl GaussianRenderer {
             bind_group_layouts: &[
                 &PointCloud::bind_group_layout_render(device), // Needed for points_2d (on binding 2)
                 &GPURSSorter::bind_group_layout_rendering(device), // Needed for indices   (on binding 4)
+                &TemporalSmoothing::grp_bind_group_layout(device), // needed for depth output statistics
             ],
             push_constant_ranges: &[],
         });
@@ -65,12 +67,7 @@ impl GaussianRenderer {
                         format: color_format,
                         blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                    Some(wgpu::ColorTargetState {
-                        format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
-                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
+                    })
                 ],
             }),
             primitive: wgpu::PrimitiveState {
@@ -256,9 +253,11 @@ impl GaussianRenderer {
         &'rpass self,
         render_pass: &mut wgpu::RenderPass<'rpass>,
         pc: &'rpass PointCloud,
+        ts: &'rpass TemporalSmoothing,
     ) {
         render_pass.set_bind_group(0, pc.render_bind_group(), &[]);
         render_pass.set_bind_group(1, &self.sorter_suff.as_ref().unwrap().sorter_render_bg, &[]);
+        render_pass.set_bind_group(2, ts.grp_bgroup(), &[]);
         render_pass.set_pipeline(&self.pipeline);
 
         render_pass.draw_indirect(&self.draw_indirect_buffer, 0);
@@ -456,6 +455,10 @@ pub struct TemporalSmoothing {
     // frame buffer for the frame just finished by the main render pass and Depth Texture
     current_frame: wgpu::TextureView,
     current_depth: wgpu::TextureView,
+
+    // gaussian rp data
+    grp_bind_group: wgpu::BindGroup,
+    grp_mutex_buffer: wgpu::Buffer,
 }
 
 impl TemporalSmoothing {
@@ -464,8 +467,8 @@ impl TemporalSmoothing {
     pub const IN_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
     pub const PIXELS_PER_COMPUTE_AXIS: u32 = 4;
     pub const CURRENT_COLOUR_WEIGHT: f32 = 0.1;
-    pub const COLOUR_SMOOTHING_HIGH: f32= 1.;
-    pub const DEPTH_SMOOTHING_HIGH: f32= 1e-3;
+    pub const COLOUR_SMOOTHING_HIGH: f32 = 1.;
+    pub const DEPTH_SMOOTHING_HIGH: f32 = 1e-3;
 
     pub fn texture(&self) -> &wgpu::TextureView {
         &self.current_frame
@@ -473,6 +476,10 @@ impl TemporalSmoothing {
     pub fn depth_texture(&self) -> &wgpu::TextureView {
         &self.current_depth
     }
+    pub fn grp_bgroup(&self) -> &wgpu::BindGroup{
+        &self.grp_bind_group
+    }
+
     fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("prev frame info bind group layout"),
@@ -554,6 +561,71 @@ impl TemporalSmoothing {
         })
     }
 
+    pub fn grp_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Gaussian Render Pass Depth Map Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    count: None,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    count: None,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::ReadWrite,
+                        format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                },
+            ],
+        })
+    }
+    
+    fn create_grp_bind_group(
+        device: &wgpu::Device,
+        current_depth: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+    ) -> (wgpu::Buffer, wgpu::BindGroup) {
+        let buf_sz_bytes = (width * height) as usize * std::mem::size_of::<u32>();
+        let mut buffer_init = Vec::with_capacity(buf_sz_bytes);
+        buffer_init.resize(buf_sz_bytes, 0);
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Initialized Mutex Buffer"),
+            usage: wgpu::BufferUsages::STORAGE,
+            contents: buffer_init.as_slice(),
+        });
+
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Bind Group for grp depth output"),
+            layout: &Self::grp_bind_group_layout(device),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffer,
+                        offset: 0,
+                        size: Some(NonZeroU64::new(buf_sz_bytes as u64).unwrap()),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&current_depth),
+                },
+            ],
+        });
+
+        (buffer, bind_group)
+    }
+
     pub fn new(
         device: &wgpu::Device,
         output_texture: &wgpu::TextureView,
@@ -584,6 +656,8 @@ impl TemporalSmoothing {
         let (current_frame, current_depth, accu_frame, accu_depth, sampler, bind_group) =
             Self::create_render_target(device, width, height, output_texture, output_depth);
 
+        let (grp_mutex_buffer, grp_bind_group) = Self::create_grp_bind_group(device, &current_depth, width, height);
+
         Self {
             pipeline,
             bind_group,
@@ -598,6 +672,9 @@ impl TemporalSmoothing {
             accu_frame,
             accu_depth,
             reprojection_data,
+
+            grp_mutex_buffer,
+            grp_bind_group,
         }
     }
 
@@ -778,10 +855,10 @@ impl TemporalSmoothing {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(output_depth),
                 },
-                wgpu::BindGroupEntry{
+                wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::Sampler(sampler),
-                }
+                },
             ],
         })
     }
@@ -807,6 +884,10 @@ impl TemporalSmoothing {
             depth_or_array_layers: 1,
         };
         self.sampler = s;
+
+        let (grp_mtx_buf, grp_bg) = Self::create_grp_bind_group(device, &self.current_depth, width, height);
+        self.grp_mutex_buffer = grp_mtx_buf;
+        self.grp_bind_group = grp_bg;
     }
 }
 
@@ -1177,7 +1258,7 @@ pub struct SplattingArgsUniform {
     current_coulour_weight: f32,
     depth_smoothing_high: f32,
     colour_smoothing_high: f32,
-    _padding: [f32;2],
+    _padding: [f32; 2],
 
     scene_center: Vector4<f32>,
 }

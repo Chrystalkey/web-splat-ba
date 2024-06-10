@@ -25,15 +25,15 @@ struct Splat {
     color_0: u32,color_1: u32,
 };
 
-struct FragmentOut {
-    @location(0) color: vec4<f32>,
-    @location(1) depth: vec4<f32>,
-};
-
 @group(0) @binding(2)
 var<storage, read> points_2d : array<Splat>;
 @group(1) @binding(4)
 var<storage, read> indices : array<u32>;
+
+@group(2) @binding(0)
+var<storage> mutex_array : array<atomic<u32>>;
+@group(2) @binding(1)
+var depth_output: texture_storage_2d<rgba32float, read_write>;
 
 @vertex
 fn vs_main(
@@ -65,13 +65,73 @@ fn vs_main(
     return out;
 }
 
+
+// scales screen space coordinates to the framebuffer dimensions
+fn unsigned_coordinate(sp_coord: vec2<f32>)->vec2<u32>{
+    let tex_dimensions = vec2<f32>(textureDimensions(depth_output).xy);
+    let coord = vec2<u32>(sp_coord*tex_dimensions);
+    return coord;
+}
+
+fn array_index(pixel_coordinate: vec2<f32>) -> u32{
+    let tex_dimensions = textureDimensions(depth_output);
+    let px_coord = unsigned_coordinate(pixel_coordinate);
+    return u32(tex_dimensions.x*px_coord.x+px_coord.y);
+}
+
+// input in screen space (0,1)
+fn spin_acquire_mutex(pixel_coordinate: vec2<f32>){
+    let array_idx = array_index(pixel_coordinate);
+    let location = &(mutex_array[array_idx]);
+
+    var exchanged = false;
+    while (!exchanged){
+        let result = atomicCompareExchangeWeak(location, u32(0), u32(1));
+        // result has (old_value: T, exchanged: bool)
+        exchanged = result.exchanged;
+    }
+}
+
+// input in screen space (0,1)
+fn release_mutex(pixel_coordinate: vec2<f32>){
+    let array_idx = array_index(pixel_coordinate);
+    let location = &(mutex_array[array_idx]);
+    let result = atomicExchange(location, u32(0));
+
+    //atomicStore(location, u32(0)); // I for some reason cannot write, but exchange. weird.
+}
+
+
+// depth is a vec4
+// channels are as follows: 
+// r == mean
+// g == variance
+// b == N
+// a == M_2
+// the default alpha blending blends using OVER, meaning C_n+1 = C_n*C_n.a*(1.-C_in) + C_in*C_in.a
+fn blend_depth(pos: vec2<f32>, new_depth: f32, alpha: f32) -> vec4<f32>{
+    let curr = textureLoad(depth_output, unsigned_coordinate(pos));
+    return vec4<f32>(
+        (curr.r*curr.b+new_depth)/(curr.b+1), // running mean
+        0.,
+        curr.b+1.,
+        0.
+    );
+}
+
 @fragment
-fn fs_main(in: VertexOutput) -> FragmentOut {
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let a = dot(in.screen_pos, in.screen_pos);
     if a > 2. * CUTOFF {
         discard;
     }
     let b = min(0.99, exp(-a) * in.color.a);
 
-    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, vec4<f32>(in.depth * b, b, 0, b));
+    spin_acquire_mutex(in.screen_pos);
+    
+    textureStore(depth_output, unsigned_coordinate(in.screen_pos), blend_depth(in.screen_pos, in.depth, b));
+
+    release_mutex(in.screen_pos);
+
+    return vec4<f32>(in.color.rgb, 1.) * b;
 }
