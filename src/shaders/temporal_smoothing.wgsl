@@ -84,7 +84,7 @@ fn depth_stats(raw_depth: vec4<f32>) -> vec4<f32> {
     let ssum = raw_depth.b;
 
     let adj_mean = sum / n;
-    let mean = adj_mean - (n * VARIANCE_K);
+    let mean = adj_mean + (n * VARIANCE_K);
     let variance = (ssum - (sum * sum) / n) / n_min_1;
     //let variance = ((ssum / n) - (sum / n) * (sum / n)) * (n / (n_min_1));
     // ((12*12)/n-(12/n*12/n))*(1/1);
@@ -121,7 +121,8 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let reproj_pos_yflipped = vec2(reproj_pos_ynormal.x, 1. - reproj_pos_ynormal.y); // flip y axis for reasons
     let reproj_pos = reproj_pos_yflipped + 1. / vec2(tex_dims_f.x / .5, tex_dims_f.y / .5); // adjust the position for an unknown, probably numeric reason
 
-    let final_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance * 200)), 1.);
+    let final_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance)* 100), 1.);
+    // let final_colour = vec4<f32>(vec3<f32>(current_depth_mean/100.), 1.);
     // var final_colour = current_colour;
     // if reproj_pos.x >= 0 && reproj_pos.x < 1. && reproj_pos.y >= 0 && reproj_pos.y < 1. {
     //     let accu_colour = textureSampleLevel(accuTexture, filter_sampler, reproj_pos, 0.);
