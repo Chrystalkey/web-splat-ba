@@ -65,6 +65,8 @@ fn vs_main(
     return out;
 }
 
+const VARIANCE_K: f32 = 1.;
+
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOut {
     let a = dot(in.screen_pos, in.screen_pos);
@@ -78,10 +80,11 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     // g is total sum of depth
     // b is sum of squares
     // a is sum of alphas, currently unused
+    let depth_adjusted = in.depth - VARIANCE_K;
     let depth_return = vec4<f32>(
         1.,
-        in.depth,
-        in.depth*in.depth,
+        depth_adjusted,
+        depth_adjusted*depth_adjusted,
         b
     );
 
