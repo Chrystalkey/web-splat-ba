@@ -71,6 +71,23 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     return mix(a_col, c_col, ccol_weight);
 }
 
+// returns
+// r => Mean
+// g => Estimated Variance
+// b => 0
+// a => 0
+fn depth_stats(raw_depth: vec4<f32>) -> vec4<f32> {
+    let n = raw_depth.r;
+    let n_min_1 = max(1., n -1.);// because if it is one, (n-1) is 0 and is divided by, leading to infinity
+    let sum = raw_depth.g;
+    let ssum = raw_depth.b;
+
+    let mean = sum / n;
+    let variance = ((ssum / n) - (sum / n) * (sum / n)) * (n / (n_min_1));
+    // ((12*12)/n-(12/n*12/n))*(1/1);
+    return vec4<f32>(mean, variance, 0., 0.);
+}
+
 fn smooth_out_at(pixel_coordinate: vec2u) {
     let tex_dims_f = vec2<f32>(textureDimensions(currentFrameTexture).xy);
     let tex_dims = vec2<u32>(tex_dims_f); // assumes all texture have the same dimensions
@@ -79,34 +96,39 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
 
     let current_colour = textureSampleLevel(currentFrameTexture, filter_sampler, current_normalized_position, 0.);
     let current_raw_depth = textureSampleLevel(currentFrameDepthTexture, filter_sampler, current_normalized_position, 0.);
-    let current_depth = current_raw_depth.r / (current_colour.a + EPSILON);
+    // depth is currently only a statistics vector. actually meaningful values are calculated below
+    let current_depth_stats = depth_stats(current_raw_depth);
+    let current_depth_mean = current_depth_stats.r;
+    let current_depth_variance = current_depth_stats.g;
+
+    // end of depth calculation
 
     // ndc
     let current_v4_pos_ndc = vec4<f32>(
         (vec2<f32>(current_position) / tex_dims_f * 2.) - vec2<f32>(1., 1.),
-        current_depth,
+        current_depth_mean,
         1.
     );
-    let current_pos_clip = current_v4_pos_ndc / current_depth;
+    let current_pos_clip = current_v4_pos_ndc / current_depth_mean;
 
     let reprojected_pos = reprojection_data.reprojection * current_pos_clip;
 
     // ndc
     let reproj_pos_ynormal = ((reprojected_pos / reprojected_pos.w).xy + vec2(1., 1.)) / 2.;
     let reproj_pos_yflipped = vec2(reproj_pos_ynormal.x, 1. - reproj_pos_ynormal.y); // flip y axis for reasons
-    let reproj_pos = reproj_pos_yflipped+1./vec2(tex_dims_f.x/.5, tex_dims_f.y/.5); // adjust the position for an unknown, probably numeric reason
+    let reproj_pos = reproj_pos_yflipped + 1. / vec2(tex_dims_f.x / .5, tex_dims_f.y / .5); // adjust the position for an unknown, probably numeric reason
 
-
-    var final_colour = current_colour;
-    if reproj_pos.x >= 0 && reproj_pos.x < 1. && reproj_pos.y >= 0 && reproj_pos.y < 1. {
-        let accu_colour = textureSampleLevel(accuTexture, filter_sampler, reproj_pos, 0.);
-        let accu_depth = textureSampleLevel(accuDepth, filter_sampler, reproj_pos, 0.).r;// here the alpha is pre-filtered out, in contrast to the current depth
-        final_colour = blend(current_colour, current_depth, accu_colour, accu_depth, current_raw_depth.g);
-    }
+    let final_colour = vec4<f32>(vec3<f32>(current_depth_variance*200), 1.);
+    // var final_colour = current_colour;
+    // if reproj_pos.x >= 0 && reproj_pos.x < 1. && reproj_pos.y >= 0 && reproj_pos.y < 1. {
+    //     let accu_colour = textureSampleLevel(accuTexture, filter_sampler, reproj_pos, 0.);
+    //     let accu_depth = textureSampleLevel(accuDepth, filter_sampler, reproj_pos, 0.).r;// here the alpha is pre-filtered out, in contrast to the current depth
+    //     final_colour = blend(current_colour, current_depth, accu_colour, accu_depth, current_raw_depth.g);
+    // }
 
     // write the texture points into the receiving buffers
     textureStore(dstTexture, current_position, final_colour);
-    textureStore(dstDepth, current_position, vec4<f32>(current_depth, 0., 0., 0.));
+    textureStore(dstDepth, current_position, vec4<f32>(current_depth_variance, 0., 0., 0.));
 }
 
 @compute @workgroup_size(1)

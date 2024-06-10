@@ -68,7 +68,18 @@ impl GaussianRenderer {
                     }),
                     Some(wgpu::ColorTargetState {
                         format: TemporalSmoothing::IN_TEXTURE_FORMAT_DEP,
-                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        blend: Some(wgpu::BlendState {
+                            alpha: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                            color: wgpu::BlendComponent {
+                                src_factor: wgpu::BlendFactor::One,
+                                dst_factor: wgpu::BlendFactor::One,
+                                operation: wgpu::BlendOperation::Add,
+                            },
+                        }),
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
                 ],
@@ -464,8 +475,8 @@ impl TemporalSmoothing {
     pub const IN_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
     pub const PIXELS_PER_COMPUTE_AXIS: u32 = 4;
     pub const CURRENT_COLOUR_WEIGHT: f32 = 0.1;
-    pub const COLOUR_SMOOTHING_HIGH: f32= 1.;
-    pub const DEPTH_SMOOTHING_HIGH: f32= 1e-3;
+    pub const COLOUR_SMOOTHING_HIGH: f32 = 1.;
+    pub const DEPTH_SMOOTHING_HIGH: f32 = 1e-3;
 
     pub fn texture(&self) -> &wgpu::TextureView {
         &self.current_frame
@@ -778,10 +789,10 @@ impl TemporalSmoothing {
                     binding: 5,
                     resource: wgpu::BindingResource::TextureView(output_depth),
                 },
-                wgpu::BindGroupEntry{
+                wgpu::BindGroupEntry {
                     binding: 6,
                     resource: wgpu::BindingResource::Sampler(sampler),
-                }
+                },
             ],
         })
     }
@@ -1177,7 +1188,7 @@ pub struct SplattingArgsUniform {
     current_coulour_weight: f32,
     depth_smoothing_high: f32,
     colour_smoothing_high: f32,
-    _padding: [f32;2],
+    _padding: [f32; 2],
 
     scene_center: Vector4<f32>,
 }

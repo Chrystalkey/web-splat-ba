@@ -73,5 +73,17 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     }
     let b = min(0.99, exp(-a) * in.color.a);
 
-    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, vec4<f32>(in.depth * b, b, 0, b));
+    // all blend components are one and operation is add, thus
+    // r is N
+    // g is total sum of depth
+    // b is sum of squares
+    // a is sum of alphas, currently unused
+    let depth_return = vec4<f32>(
+        1.,
+        in.depth,
+        in.depth*in.depth,
+        b
+    );
+
+    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, depth_return);
 }
