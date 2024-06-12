@@ -487,13 +487,14 @@ impl WindowContext {
                 self.display.texture(),
                 self.display.depth_texture(),
             );
-
+            
+            let grp_out = self.temp_smoother.input_textures();
             // and now the main render pass
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("render pass"),
                 color_attachments: &[
                     Some(wgpu::RenderPassColorAttachment {
-                        view: self.temp_smoother.texture(),
+                        view: &(grp_out.current_frame),
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -506,7 +507,22 @@ impl WindowContext {
                         },
                     }),
                     Some(wgpu::RenderPassColorAttachment {
-                        view: self.temp_smoother.depth_texture(),
+                        view: &grp_out.current_depth,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(
+                                wgpu::Color{
+                                    r: 0.,
+                                    g: 0.,
+                                    b: 0.,
+                                    a: 1.,
+                                }
+                            ),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &grp_out.current_depth_stats,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(

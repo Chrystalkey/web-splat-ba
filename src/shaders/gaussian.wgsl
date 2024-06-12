@@ -27,7 +27,8 @@ struct Splat {
 
 struct FragmentOut {
     @location(0) color: vec4<f32>,
-    @location(1) depth: vec4<f32>,
+    @location(1) depth_stats: vec4<f32>,
+    @location(2) depth_blend: vec4<f32>,
 };
 
 @group(0) @binding(2)
@@ -65,7 +66,7 @@ fn vs_main(
     return out;
 }
 
-const VARIANCE_K: f32 = 1.;
+const VARIANCE_K: f32 = 2.;
 
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOut {
@@ -81,12 +82,18 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     // b is sum of squares
     // a is sum of alphas, currently unused
     let depth_adjusted = in.depth - VARIANCE_K;
-    let depth_return = vec4<f32>(
+    let depth_stat_return = vec4<f32>(
         1.,
         depth_adjusted,
         depth_adjusted*depth_adjusted,
         b
     );
+    let depth_return = vec4<f32>(
+        in.depth*b,
+        b,
+        0.,
+        b
+    );
 
-    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, depth_return);
+    return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, depth_return, depth_stat_return);
 }
