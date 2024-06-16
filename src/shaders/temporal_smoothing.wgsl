@@ -63,13 +63,13 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     alpha: f32) -> vec4<f32> {
     let depth_diff = abs(a_depth - c_depth);
     let colour_diff = distance(c_col.rgba, a_col.rgba);
-
-    if depth_diff < render_settings.depth_smoothing_high && colour_diff > render_settings.colour_smoothing_high {
-        return vec4(0., 0., 1., 1.);
+    return vec4<f32>(depth_diff*100., colour_diff, 0., 1.);
+    // if depth_diff < render_settings.depth_smoothing_high && colour_diff > render_settings.colour_smoothing_high {
+        // return vec4(0.5, 1., 1., 1.);
         // return mix(a_col, c_col, render_settings.current_colour_weight);
-    }else{
-        return c_col;
-    }
+    // } else {
+        // return c_col;
+    // }
 }
 
 // returns
