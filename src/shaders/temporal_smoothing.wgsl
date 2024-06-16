@@ -62,16 +62,14 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     a_col: vec4<f32>, a_depth: f32,
     alpha: f32) -> vec4<f32> {
     let depth_diff = abs(a_depth - c_depth);
+    let colour_diff = distance(c_col.rgba, a_col.rgba);
 
-    // smooth out depth difference, clamp between 0 and 1
-    // if the depth diff is 0 or close to it, the blending should be done, meaning the weight should be 1
-    let ddiff_coeff = 1. - smoothstep(0., render_settings.depth_smoothing_high, depth_diff);
-
-    let colour_diff = distance(c_col.rgb, a_col.rgb);
-    let cdiff_coeff = smoothstep(0., render_settings.colour_smoothing_high, colour_diff);
-
-    let ccol_weight = mix(0.5 * ddiff_coeff, 1., render_settings.current_colour_weight); // *cdiff_coeff;
-    return mix(a_col, c_col, render_settings.current_colour_weight);
+    if depth_diff < render_settings.depth_smoothing_high && colour_diff > render_settings.colour_smoothing_high {
+        return vec4(0., 0., 1., 1.);
+        // return mix(a_col, c_col, render_settings.current_colour_weight);
+    }else{
+        return c_col;
+    }
 }
 
 // returns
