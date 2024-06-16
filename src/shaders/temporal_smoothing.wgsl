@@ -51,6 +51,7 @@ struct ReprojectionData {
 @group(1) @binding(6) var filter_sampler: sampler;
 
 @group(1) @binding(7) var currentFrameDepthStatistics: texture_2d<f32>;
+@group(1) @binding(8) var debug_output: texture_storage_2d<rgba32float, read_write>;
 
 @group(2) @binding(0) var<uniform> render_settings: RenderSettings;
 @group(3) @binding(0) var<uniform> reprojection_data: ReprojectionData;
@@ -124,16 +125,18 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let reproj_pos = reproj_pos_yflipped + 1. / vec2(tex_dims_f.x / .5, tex_dims_f.y / .5); // adjust the position for an unknown, probably numeric reason
 
     var final_colour = current_colour;
+    var dbg_colour = current_colour;
     if reproj_pos.x >= 0 && reproj_pos.x < 1. && reproj_pos.y >= 0 && reproj_pos.y < 1. {
         let accu_colour = textureSampleLevel(accuTexture, filter_sampler, reproj_pos, 0.);
         let accu_depth = textureSampleLevel(accuDepth, filter_sampler, reproj_pos, 0.).r;// here the alpha is pre-filtered out, in contrast to the current depth
-        final_colour = blend(current_colour, current_depth, accu_colour, accu_depth, depth_raw.g);
+        dbg_colour = blend(current_colour, current_depth, accu_colour, accu_depth, depth_raw.g);
     }
     // final_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance)* 100), 1.);  // depth variance 
     // final_colour = vec4<f32>(vec3<f32>(current_depth_mean/100.), 1.);            // depth mean value
     // final_colour = vec4<f32>(vec3<f32>(current_depth), 1.);                      // blended depth value
 
     // write the texture points into the receiving buffers
+    textureStore(debug_output, current_position, dbg_colour);
     textureStore(dstTexture, current_position, final_colour);
     textureStore(dstDepth, current_position, vec4<f32>(current_depth, 0., 0., 0.));
 }

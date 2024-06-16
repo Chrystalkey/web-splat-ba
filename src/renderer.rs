@@ -11,6 +11,8 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::time::Duration;
 
+use egui::output;
+use egui_wgpu::WgpuConfiguration;
 use wgpu::{include_wgsl, Extent3d, MultisampleState};
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector4};
@@ -461,7 +463,7 @@ pub struct GRPTextures {
     pub current_depth: wgpu::TextureView,
     pub current_depth_stats: wgpu::TextureView,
 }
-impl GRPTextures{
+impl GRPTextures {
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba32Float;
 }
 /// Contains everything for the temporal smoothing in-between pass. The pass starts by taking the
@@ -581,6 +583,17 @@ impl TemporalSmoothing {
                     },
                     count: None,
                 },
+                // debug output texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 8,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::StorageTexture {
+                        access: wgpu::StorageTextureAccess::ReadWrite,
+                        format: wgpu::TextureFormat::Rgba32Float, // because storage textures and f16 dont mingle well
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                    },
+                    count: None,
+                },
             ],
         })
     }
@@ -589,6 +602,7 @@ impl TemporalSmoothing {
         device: &wgpu::Device,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
+        output_debug: &wgpu::TextureView,
         width: u32,
         height: u32,
     ) -> Self {
@@ -613,7 +627,7 @@ impl TemporalSmoothing {
         let reprojection_data =
             UniformBuffer::new_default(device, Some("accu frame transformation"));
         let (grp_textures, accu_frame, accu_depth, sampler, bind_group) =
-            Self::create_render_target(device, width, height, output_texture, output_depth);
+            Self::create_render_target(device, width, height, output_texture, output_depth, output_debug);
 
         Self {
             pipeline,
@@ -637,6 +651,7 @@ impl TemporalSmoothing {
         height: u32,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
+        output_debug: &wgpu::TextureView
     ) -> (
         GRPTextures,
         wgpu::TextureView,
@@ -729,6 +744,7 @@ impl TemporalSmoothing {
             &sampler,
             output_texture,
             output_depth,
+            output_debug
         );
 
         return (grp_textures, ac_view, acd_view, sampler, bind_group);
@@ -771,6 +787,7 @@ impl TemporalSmoothing {
         device: &wgpu::Device,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
+        output_debug: &wgpu::TextureView
     ) {
         self.bind_group = Self::build_bind_group(
             device,
@@ -780,6 +797,7 @@ impl TemporalSmoothing {
             &self.sampler,
             output_texture,
             output_depth,
+            output_debug,
         );
     }
 
@@ -791,6 +809,7 @@ impl TemporalSmoothing {
         sampler: &wgpu::Sampler,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
+        output_debug: &wgpu::TextureView
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("render target bind group of tempsmooth"),
@@ -828,6 +847,10 @@ impl TemporalSmoothing {
                     binding: 7,
                     resource: wgpu::BindingResource::TextureView(&grp_textures.current_depth_stats),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(&output_debug),
+                },
             ],
         })
     }
@@ -839,9 +862,10 @@ impl TemporalSmoothing {
         height: u32,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
+        output_debug: &wgpu::TextureView,
     ) {
         let (grp_t, a, ad, s, bind_group) =
-            Self::create_render_target(device, width, height, output_texture, output_depth);
+            Self::create_render_target(device, width, height, output_texture, output_depth, output_debug);
         self.bind_group = bind_group;
         self.accu_frame = a;
         self.accu_depth = ad;
@@ -858,6 +882,7 @@ impl TemporalSmoothing {
 pub struct Display {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
+    dbg_view: wgpu::TextureView,
     view: wgpu::TextureView,
     depth_view: wgpu::TextureView,
 
@@ -901,26 +926,38 @@ impl Display {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: target_format,
-                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: &[
+                    Some(wgpu::ColorTargetState {
+                        format: target_format,
+                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                    Some(wgpu::ColorTargetState {
+                        format: target_format,
+                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    }),
+                ],
             }),
             multiview: None,
         });
         let env_bg = Self::create_env_map_bg(device, None);
-        let (view, depth_view, sampler, bind_group) =
+        let (view, depth_view, dbg_view, sampler, bind_group) =
             Self::create_render_target(device, width, height);
         Self {
             pipeline,
             view,
             depth_view,
+            dbg_view,
             sampler,
             bind_group,
             env_bg,
             has_env_map: false,
         }
+    }
+
+    pub fn dbg_texture(&self) -> &wgpu::TextureView {
+        &self.dbg_view
     }
 
     pub fn texture(&self) -> &wgpu::TextureView {
@@ -1020,6 +1057,7 @@ impl Display {
     ) -> (
         wgpu::TextureView,
         wgpu::TextureView,
+        wgpu::TextureView,
         wgpu::Sampler,
         wgpu::BindGroup,
     ) {
@@ -1059,6 +1097,25 @@ impl Display {
         });
         let dt_view = depth_tex.create_view(&Default::default());
 
+        // debug texture
+        let dbg_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("debug texture"),
+            size: Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::STORAGE_BINDING, // storage binding because tempsmoother needs it
+            view_formats: &[],
+        });
+        let dbg_view = dbg_texture.create_view(&Default::default());
+
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
@@ -1076,9 +1133,13 @@ impl Display {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
+                wgpu::BindGroupEntry{
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&dbg_view),
+                }
             ],
         });
-        return (texture_view, dt_view, sampler, bind_group);
+        return (texture_view, dt_view, dbg_view, sampler, bind_group);
     }
 
     pub fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -1101,6 +1162,16 @@ impl Display {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         })
     }
@@ -1118,37 +1189,52 @@ impl Display {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&self.dbg_view),
+                },
             ],
         });
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
-        let (view, dt_view, sampler, bind_group) =
+        let (view, dt_view, dbg_view, sampler, bind_group) =
             Self::create_render_target(device, width, height);
         self.bind_group = bind_group;
         self.view = view;
         self.depth_view = dt_view;
         self.sampler = sampler;
+        self.dbg_view = dbg_view;
     }
 
     pub fn render(
         &self,
         encoder: &mut wgpu::CommandEncoder,
-        target: &wgpu::TextureView,
+        target: (&wgpu::TextureView, &wgpu::TextureView),
         background_color: wgpu::Color,
         camera: &UniformBuffer<CameraUniform>,
         render_settings: &UniformBuffer<SplattingArgsUniform>,
     ) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("render pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(background_color),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
+            color_attachments: &[
+                Some(wgpu::RenderPassColorAttachment {
+                    view: target.0,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(background_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+                Some(wgpu::RenderPassColorAttachment {
+                    view: target.1,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(background_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                }),
+            ],
             ..Default::default()
         });
         render_pass.set_bind_group(0, &self.bind_group, &[]);

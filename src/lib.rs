@@ -9,7 +9,8 @@ use std::{
 use image::Pixel;
 #[cfg(target_arch = "wasm32")]
 use instant::{Duration, Instant};
-use renderer::Display;
+use renderer::{Display, GRPTextures};
+use serde::de;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 use wgpu::{util::DeviceExt, Backends, Extent3d};
@@ -147,6 +148,10 @@ pub struct WindowContext {
     window: Arc<Window>,
     scale_factor: f32,
 
+    // here come the debug-enabled secondary windows/surfaces
+    debug_window: Arc<Window>,
+    debug_surface: wgpu::Surface<'static>,
+
     pc: PointCloud,
     pointcloud_file_path: Option<PathBuf>,
     renderer: GaussianRenderer,
@@ -181,6 +186,9 @@ impl WindowContext {
     // Creating some of the wgpu types requires async code
     async fn new<R: Read + Seek>(
         window: Window,
+
+        debug_window: Window,
+        
         pc_file: R,
         render_config: &RenderConfig,
     ) -> anyhow::Result<Self> {
@@ -228,6 +236,13 @@ impl WindowContext {
         };
         surface.configure(&device, &config);
 
+        let (debug_window, debug_surface) = {
+            let debug_window = Arc::new(debug_window);
+            let debug_surface: wgpu::Surface = instance.create_surface(debug_window.clone())?;
+            debug_surface.configure(device, &config);
+            (debug_window, debug_surface)
+        };
+
         let pc_raw = io::GenericGaussianPointCloud::load(pc_file)?;
         let pc = PointCloud::new(&device, pc_raw)?;
         log::info!("loaded point cloud with {:} points", pc.num_points());
@@ -269,6 +284,7 @@ impl WindowContext {
             device,
             display.texture(),
             display.depth_texture(),
+            display.dbg_texture(),
             size.width,
             size.height,
         );
@@ -283,7 +299,9 @@ impl WindowContext {
             wgpu_context,
             scale_factor: window.scale_factor() as f32,
             window,
+            debug_window,
             surface,
+            debug_surface,
             config,
             renderer,
             splatting_args: SplattingArgs {
@@ -352,6 +370,8 @@ impl WindowContext {
             self.config.height = new_size.height;
             self.surface
                 .configure(&self.wgpu_context.device, &self.config);
+            self.debug_surface
+                .configure(&self.wgpu_context.device, &self.config);
             self.display
                 .resize(&self.wgpu_context.device, new_size.width, new_size.height);
             self.temp_smoother.resize(
@@ -359,7 +379,7 @@ impl WindowContext {
                 new_size.width,
                 new_size.height,
                 self.display.texture(),
-                &self.display.depth_texture(),
+                &self.display.depth_texture(),&self.display.dbg_texture()
             );
             self.splatting_args
                 .camera
@@ -434,7 +454,13 @@ impl WindowContext {
         }
 
         let output = self.surface.get_current_texture()?;
+        
+        let debug_output = self.debug_surface.get_current_texture()?;
         let view_rgb = output.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.config.format.remove_srgb_suffix()),
+            ..Default::default()
+        });
+        let dbg_view_rgb = debug_output.texture.create_view(&wgpu::TextureViewDescriptor {
             format: Some(self.config.format.remove_srgb_suffix()),
             ..Default::default()
         });
@@ -486,8 +512,9 @@ impl WindowContext {
                 &self.wgpu_context.device,
                 self.display.texture(),
                 self.display.depth_texture(),
+                self.display.dbg_texture()
             );
-            
+
             let grp_out = self.temp_smoother.input_textures();
             // and now the main render pass
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -510,14 +537,12 @@ impl WindowContext {
                         view: &grp_out.current_depth,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(
-                                wgpu::Color{
-                                    r: 0.,
-                                    g: 0.,
-                                    b: 0.,
-                                    a: 1.,
-                                }
-                            ),
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.,
+                                g: 0.,
+                                b: 0.,
+                                a: 1.,
+                            }),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
@@ -525,14 +550,12 @@ impl WindowContext {
                         view: &grp_out.current_depth_stats,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(
-                                wgpu::Color{
-                                    r: 0.,
-                                    g: 0.,
-                                    b: 0.,
-                                    a: 1.,
-                                }
-                            ),
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.,
+                                g: 0.,
+                                b: 0.,
+                                a: 1.,
+                            }),
                             store: wgpu::StoreOp::Store,
                         },
                     }),
@@ -558,7 +581,7 @@ impl WindowContext {
 
         self.display.render(
             &mut encoder,
-            &view_rgb,
+            (&view_rgb, &dbg_view_rgb),
             wgpu::Color {
                 r: rgba[0] as f64 / 255.,
                 g: rgba[1] as f64 / 255.,
@@ -568,6 +591,7 @@ impl WindowContext {
             self.renderer.camera(),
             &self.renderer.render_settings(),
         );
+
         self.stopwatch.as_mut().map(|s| s.end(&mut encoder));
         self.wgpu_context.queue.submit([encoder.finish()]);
 
@@ -592,6 +616,9 @@ impl WindowContext {
         }
 
         output.present();
+        // TODO: render into debug surface if debug surface is enabled
+        // the output texture is the second fragment output of temporal smoothing and /or any other rp
+        debug_output.present();
         Ok(())
     }
 
@@ -776,6 +803,12 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
         .with_inner_size(window_size)
         .build(&event_loop)
         .unwrap();
+    
+    let debug_window = WindowBuilder::new()
+        .with_title("debug")
+        .with_inner_size(window_size)
+        .build(&event_loop)
+        .unwrap();
 
     #[cfg(target_arch = "wasm32")]
     {
@@ -802,7 +835,7 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
             .expect("couldn't append canvas to document body");
     }
 
-    let mut state = WindowContext::new(window, file, &config).await.unwrap();
+    let mut state = WindowContext::new(window, debug_window, file, &config).await.unwrap();
     state.pointcloud_file_path = pointcloud_file_path;
 
     if let Some(scene) = scene {
