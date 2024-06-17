@@ -488,8 +488,8 @@ impl TemporalSmoothing {
     pub const OUT_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
     pub const PIXELS_PER_COMPUTE_AXIS: u32 = 4;
     pub const CURRENT_COLOUR_WEIGHT: f32 = 0.1;
-    pub const COLOUR_SMOOTHING_HIGH: f32 = 1.;
-    pub const DEPTH_SMOOTHING_HIGH: f32 = 1e-3;
+    pub const COLOUR_SMOOTHING_HIGH: f32 = 0.4;
+    pub const DEPTH_SMOOTHING_HIGH: f32 = 5e-3;
 
     pub fn input_textures(&self) -> &GRPTextures {
         &self.grp_textures
