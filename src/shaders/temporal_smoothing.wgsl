@@ -59,8 +59,7 @@ struct ReprojectionData {
 const EPSILON = 1e-5;
 const VARIANCE_K = 2.;
 
-fn rgb2hsv(c: vec3<f32>) -> vec3<f32>
-{
+fn rgb2hsv(c: vec3<f32>) -> vec3<f32> {
     let K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
     let p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
     let q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
@@ -75,10 +74,8 @@ fn rgb2hsv(c: vec3<f32>) -> vec3<f32>
 // - manhattan or euclidean distance?
 // - how to weight the colour difference(hue/saturation/value or r/g/b)
 // - normalizing colours?
-fn colour_difference(curr: vec3<f32>, accu: vec3<f32>) -> f32{
-    let curr_hsv = rgb2hsv(curr);
-    let accu_hsv = rgb2hsv(accu);
-    return abs(curr_hsv.x - accu_hsv.x) + abs(curr_hsv.y - accu_hsv.y);
+fn colour_difference(curr: vec3<f32>, accu: vec3<f32>) -> f32 {
+    return distance(curr, accu) / sqrt(3.); // because distance([0,0,0], [1,1,1] = sqrt(3) and such it is normalized
 }
 
 fn blend(c_col: vec4<f32>, c_depth: f32,
@@ -86,8 +83,8 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     alpha: f32) -> vec4<f32> {
     let depth_diff = abs(a_depth - c_depth);
 
-    let colour_diff = colour_difference(c_col.rgb, a_col.rgb);
-    return vec4<f32>(depth_diff*100., 0., 0., 1.);
+    let colour_diff = colour_difference(c_col.rgb*c_col.a, a_col.rgb);
+    return vec4<f32>(colour_diff, 0., 0., 1.);
     // if depth_diff < render_settings.depth_smoothing_high && colour_diff > render_settings.colour_smoothing_high {
         // return vec4(0.5, 1., 1., 1.);
         // return mix(a_col, c_col, render_settings.current_colour_weight);
@@ -148,7 +145,8 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let reproj_pos = reproj_pos_yflipped + 1. / vec2(tex_dims_f.x / .5, tex_dims_f.y / .5); // adjust the position for an unknown, probably numeric reason
 
     var final_colour = current_colour;
-    var dbg_colour = vec4<f32>(0., 0., 0., 1.);
+    // var dbg_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance)*100.), 1.);
+    var dbg_colour = vec4<f32>(vec3<f32>(0.), 1.);
     if reproj_pos.x >= 0 && reproj_pos.x < 1. && reproj_pos.y >= 0 && reproj_pos.y < 1. {
         let accu_colour = textureSampleLevel(accuTexture, filter_sampler, reproj_pos, 0.);
         let accu_depth = textureSampleLevel(accuDepth, filter_sampler, reproj_pos, 0.).r;// here the alpha is pre-filtered out, in contrast to the current depth

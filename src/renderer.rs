@@ -627,7 +627,14 @@ impl TemporalSmoothing {
         let reprojection_data =
             UniformBuffer::new_default(device, Some("accu frame transformation"));
         let (grp_textures, accu_frame, accu_depth, sampler, bind_group) =
-            Self::create_render_target(device, width, height, output_texture, output_depth, output_debug);
+            Self::create_render_target(
+                device,
+                width,
+                height,
+                output_texture,
+                output_depth,
+                output_debug,
+            );
 
         Self {
             pipeline,
@@ -651,7 +658,7 @@ impl TemporalSmoothing {
         height: u32,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
-        output_debug: &wgpu::TextureView
+        output_debug: &wgpu::TextureView,
     ) -> (
         GRPTextures,
         wgpu::TextureView,
@@ -744,7 +751,7 @@ impl TemporalSmoothing {
             &sampler,
             output_texture,
             output_depth,
-            output_debug
+            output_debug,
         );
 
         return (grp_textures, ac_view, acd_view, sampler, bind_group);
@@ -787,7 +794,7 @@ impl TemporalSmoothing {
         device: &wgpu::Device,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
-        output_debug: &wgpu::TextureView
+        output_debug: &wgpu::TextureView,
     ) {
         self.bind_group = Self::build_bind_group(
             device,
@@ -809,7 +816,7 @@ impl TemporalSmoothing {
         sampler: &wgpu::Sampler,
         output_texture: &wgpu::TextureView,
         output_depth: &wgpu::TextureView,
-        output_debug: &wgpu::TextureView
+        output_debug: &wgpu::TextureView,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("render target bind group of tempsmooth"),
@@ -864,8 +871,14 @@ impl TemporalSmoothing {
         output_depth: &wgpu::TextureView,
         output_debug: &wgpu::TextureView,
     ) {
-        let (grp_t, a, ad, s, bind_group) =
-            Self::create_render_target(device, width, height, output_texture, output_depth, output_debug);
+        let (grp_t, a, ad, s, bind_group) = Self::create_render_target(
+            device,
+            width,
+            height,
+            output_texture,
+            output_depth,
+            output_debug,
+        );
         self.bind_group = bind_group;
         self.accu_frame = a;
         self.accu_depth = ad;
@@ -1101,8 +1114,8 @@ impl Display {
         let dbg_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("debug texture"),
             size: Extent3d {
-                width: 1,
-                height: 1,
+                width,
+                height,
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -1133,10 +1146,10 @@ impl Display {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
-                wgpu::BindGroupEntry{
+                wgpu::BindGroupEntry {
                     binding: 2,
                     resource: wgpu::BindingResource::TextureView(&dbg_view),
-                }
+                },
             ],
         });
         return (texture_view, dt_view, dbg_view, sampler, bind_group);
