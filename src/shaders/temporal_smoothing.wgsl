@@ -76,10 +76,23 @@ fn rgb2hsv(c: vec3<f32>) -> vec3<f32> {
 // - manhattan or euclidean distance?
 // - how to weight the colour difference(hue/saturation/value or r/g/b)
 // - normalizing colours?
+
+// trial set dimensions
+// distance() always divide by sqrt(3) because distance([0,0,0], [1,1,1] = sqrt(3) and thus it is normalized
+// - euclidian or manhattan
+// - rgb or hsv
+// - abs(hue)
 fn colour_difference(curr: vec3<f32>, accu: vec3<f32>) -> f32 {
-    return distance(curr, accu) / sqrt(3.); // because distance([0,0,0], [1,1,1] = sqrt(3) and such it is normalized
+    let ahsv = rgb2hsv(accu);
+    let chsv = rgb2hsv(curr);
+    return distance(curr, accu) / sqrt(3.); // distance and rgb
+    // let dvec = curr-accu;
+    // return (dvec.r+dvec.g+dvec.b)/3.;// manhattan and rgb, normalised to 0..1
+    // return distance(ahsv, chsv) / sqrt(3.);
+    // return abs(ahsv.r - chsv.r); // well, kinda useless
 }
 
+// stands for debug colour output
 struct DCO {
     colour: vec4<f32>,
     debug: vec4<f32>,
@@ -89,20 +102,22 @@ struct DCO {
 
 fn blend(c_col: vec4<f32>, c_depth: f32,
     a_col: vec4<f32>, a_depth: f32,
-    alpha: f32) -> DCO {
+    alpha: f32,
+    depth_variance: f32) -> DCO {
     let depth_diff = abs(a_depth - c_depth);
 
-    let colour_diff = colour_difference(c_col.rgb * c_col.a, a_col.rgb);
+    let colour_diff = colour_difference(c_col.rgb, a_col.rgb);
     //return vec4<f32>(depth_diff*100., colour_diff, 0., 1.); // cool effect, though
     var colour = c_col;
     var debug = BLACK;
 
-    let dd_coeff = 1.-smoothstep(0., render_settings.depth_smoothing_high, depth_diff);
+    let dd_coeff = 1. - smoothstep(0., render_settings.depth_smoothing_high, depth_diff);
     let cd_coeff = smoothstep(0., render_settings.colour_smoothing_high, colour_diff);
-    let mix_coeff = (dd_coeff*cd_coeff)*(dd_coeff*cd_coeff);
+    let vr_coeff = smoothstep(0., 0.01, sqrt(depth_variance));
+    let mix_coeff = (dd_coeff * cd_coeff) * (dd_coeff * cd_coeff);
     let mix_col = mix(a_col, c_col, render_settings.current_colour_weight);
-    colour = mix(mix_col, c_col, mix_coeff);
-    debug = mix(BLACK, vec4(0.5, 1., 1., 1.), mix_coeff);
+    colour = mix(c_col, mix_col, mix_coeff);
+    debug = mix(BLACK, vec4(1., 0., 0., 1.), mix_coeff);
     // if depth_diff < render_settings.depth_smoothing_high && colour_diff > render_settings.colour_smoothing_high {
     //     debug = vec4(0.5, 1., 1., 1.);
     //     colour = mix(a_col, c_col, render_settings.current_colour_weight);
@@ -168,7 +183,8 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     if reproj_pos.x >= 0 && reproj_pos.x < 1. && reproj_pos.y >= 0 && reproj_pos.y < 1. {
         let accu_colour = textureSampleLevel(accuTexture, filter_sampler, reproj_pos, 0.);
         let accu_depth = textureSampleLevel(accuDepth, filter_sampler, reproj_pos, 0.).r;// here the alpha is pre-filtered out, in contrast to the current depth
-        output = blend(current_colour, current_depth, accu_colour, accu_depth, depth_raw.g);
+        output = blend(current_colour, current_depth, accu_colour, accu_depth, depth_raw.g, current_depth_variance);
+        //output = DCO(output.colour, vec4<f32>(output.debug.r, sqrt(current_depth_variance)*100., 0., 1.)); // premultiplied alpha
     }
     // final_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance)* 100), 1.);  // depth variance 
     // final_colour = vec4<f32>(vec3<f32>(current_depth_mean/100.), 1.);            // depth mean value
