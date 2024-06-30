@@ -148,10 +148,6 @@ pub struct WindowContext {
     window: Arc<Window>,
     scale_factor: f32,
 
-    // here come the debug-enabled secondary windows/surfaces
-    debug_window: Arc<Window>,
-    debug_surface: wgpu::Surface<'static>,
-
     pc: PointCloud,
     pointcloud_file_path: Option<PathBuf>,
     renderer: GaussianRenderer,
@@ -186,9 +182,6 @@ impl WindowContext {
     // Creating some of the wgpu types requires async code
     async fn new<R: Read + Seek>(
         window: Window,
-
-        debug_window: Window,
-        
         pc_file: R,
         render_config: &RenderConfig,
     ) -> anyhow::Result<Self> {
@@ -236,13 +229,6 @@ impl WindowContext {
         };
         surface.configure(&device, &config);
 
-        let (debug_window, debug_surface) = {
-            let debug_window = Arc::new(debug_window);
-            let debug_surface: wgpu::Surface = instance.create_surface(debug_window.clone())?;
-            debug_surface.configure(device, &config);
-            (debug_window, debug_surface)
-        };
-
         let pc_raw = io::GenericGaussianPointCloud::load(pc_file)?;
         let pc = PointCloud::new(&device, pc_raw)?;
         log::info!("loaded point cloud with {:} points", pc.num_points());
@@ -282,9 +268,10 @@ impl WindowContext {
         );
         let temp_smoother: TemporalSmoothing = TemporalSmoothing::new(
             device,
-            display.texture(),
-            display.depth_texture(),
-            display.dbg_texture(),
+            display.in_col_tex(),
+            display.in_dep_tex(),
+            display.in_dbg_tex(),
+            
             size.width,
             size.height,
         );
@@ -299,9 +286,7 @@ impl WindowContext {
             wgpu_context,
             scale_factor: window.scale_factor() as f32,
             window,
-            debug_window,
             surface,
-            debug_surface,
             config,
             renderer,
             splatting_args: SplattingArgs {
@@ -370,16 +355,15 @@ impl WindowContext {
             self.config.height = new_size.height;
             self.surface
                 .configure(&self.wgpu_context.device, &self.config);
-            self.debug_surface
-                .configure(&self.wgpu_context.device, &self.config);
             self.display
                 .resize(&self.wgpu_context.device, new_size.width, new_size.height);
             self.temp_smoother.resize(
                 &self.wgpu_context.device,
                 new_size.width,
                 new_size.height,
-                self.display.texture(),
-                &self.display.depth_texture(),&self.display.dbg_texture()
+                self.display.in_col_tex(),
+                self.display.in_dep_tex(),
+                self.display.in_dbg_tex(),
             );
             self.splatting_args
                 .camera
@@ -455,12 +439,7 @@ impl WindowContext {
 
         let output = self.surface.get_current_texture()?;
         
-        let debug_output = self.debug_surface.get_current_texture()?;
         let view_rgb = output.texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(self.config.format.remove_srgb_suffix()),
-            ..Default::default()
-        });
-        let dbg_view_rgb = debug_output.texture.create_view(&wgpu::TextureViewDescriptor {
             format: Some(self.config.format.remove_srgb_suffix()),
             ..Default::default()
         });
@@ -510,9 +489,9 @@ impl WindowContext {
             self.display.rewrite_bind_group(&self.wgpu_context.device);
             self.temp_smoother.rewrite_bind_group(
                 &self.wgpu_context.device,
-                self.display.texture(),
-                self.display.depth_texture(),
-                self.display.dbg_texture()
+                self.display.in_col_tex(),
+                self.display.in_dep_tex(),
+                self.display.in_dbg_tex()
             );
 
             let grp_out = self.temp_smoother.input_textures();
@@ -581,7 +560,7 @@ impl WindowContext {
 
         self.display.render(
             &mut encoder,
-            (&view_rgb, &dbg_view_rgb),
+            (&view_rgb, &self.display.in_dbg_tex()),
             wgpu::Color {
                 r: rgba[0] as f64 / 255.,
                 g: rgba[1] as f64 / 255.,
@@ -616,9 +595,6 @@ impl WindowContext {
         }
 
         output.present();
-        // TODO: render into debug surface if debug surface is enabled
-        // the output texture is the second fragment output of temporal smoothing and /or any other rp
-        debug_output.present();
         Ok(())
     }
 
@@ -803,12 +779,6 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
         .with_inner_size(window_size)
         .build(&event_loop)
         .unwrap();
-    
-    let debug_window = WindowBuilder::new()
-        .with_title("debug")
-        .with_inner_size(window_size)
-        .build(&event_loop)
-        .unwrap();
 
     #[cfg(target_arch = "wasm32")]
     {
@@ -835,7 +805,7 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
             .expect("couldn't append canvas to document body");
     }
 
-    let mut state = WindowContext::new(window, debug_window, file, &config).await.unwrap();
+    let mut state = WindowContext::new(window, file, &config).await.unwrap();
     state.pointcloud_file_path = pointcloud_file_path;
 
     if let Some(scene) = scene {

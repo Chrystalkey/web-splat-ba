@@ -895,8 +895,11 @@ impl TemporalSmoothing {
 pub struct Display {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
+    // debug input texture
     dbg_view: wgpu::TextureView,
+    // colour input texture
     view: wgpu::TextureView,
+    // depth input texture
     depth_view: wgpu::TextureView,
 
     sampler: wgpu::Sampler,
@@ -945,11 +948,6 @@ impl Display {
                         blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
-                    Some(wgpu::ColorTargetState {
-                        format: target_format,
-                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
                 ],
             }),
             multiview: None,
@@ -969,18 +967,18 @@ impl Display {
         }
     }
 
-    pub fn dbg_texture(&self) -> &wgpu::TextureView {
+    pub fn in_dbg_tex(&self) -> &wgpu::TextureView {
         &self.dbg_view
     }
 
-    pub fn texture(&self) -> &wgpu::TextureView {
+    pub fn in_col_tex(&self) -> &wgpu::TextureView {
         &self.view
     }
     pub fn texture_mut(&mut self) -> &mut wgpu::TextureView {
         &mut self.view
     }
 
-    pub fn depth_texture(&self) -> &wgpu::TextureView {
+    pub fn in_dep_tex(&self) -> &wgpu::TextureView {
         &self.depth_view
     }
     pub fn depth_texture_mut(&mut self) -> &mut wgpu::TextureView {
@@ -1146,10 +1144,6 @@ impl Display {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&dbg_view),
-                },
             ],
         });
         return (texture_view, dt_view, dbg_view, sampler, bind_group);
@@ -1175,16 +1169,6 @@ impl Display {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
             ],
         })
     }
@@ -1201,10 +1185,6 @@ impl Display {
                 wgpu::BindGroupEntry {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&self.dbg_view),
                 },
             ],
         });
@@ -1233,14 +1213,6 @@ impl Display {
             color_attachments: &[
                 Some(wgpu::RenderPassColorAttachment {
                     view: target.0,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(background_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                }),
-                Some(wgpu::RenderPassColorAttachment {
-                    view: target.1,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(background_color),

@@ -328,6 +328,25 @@ pub(crate) fn ui(state: &mut WindowContext) {
             }
         });
 
+    //#[cfg(feature="debug-texture")]
+    {
+        egui::Window::new("Debug Output")
+        .default_width(200.)
+        .default_height(100.)
+        .resizable(true)
+        .show(
+            ctx, |ui| {
+                let tex_id = state.ui_renderer.renderer
+                .register_native_texture(&state.wgpu_context.device, 
+                    &state.display.in_dbg_tex(),
+                    wgpu::FilterMode::Linear);
+                    ui.add(
+                        egui::widgets::Image::from_texture((tex_id, egui::Vec2::new(state.config.width as f32/2., state.config.height as f32/2.)))
+                    );
+            }
+        );
+    }
+
     #[cfg(target_arch = "wasm32")]
     egui::Window::new("🎮")
         .default_width(200.)
