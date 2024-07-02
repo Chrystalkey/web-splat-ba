@@ -1,12 +1,12 @@
+#[cfg(target_arch = "wasm32")]
+use instant::Duration;
 use std::ops::RangeInclusive;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
-#[cfg(target_arch = "wasm32")]
-use instant::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::renderer::DEFAULT_KERNEL_SIZE;
-use crate::{ SceneCamera, Split, WindowContext};
+use crate::{SceneCamera, Split, WindowContext};
 use cgmath::{Euler, Matrix3, Quaternion};
 #[cfg(not(target_arch = "wasm32"))]
 use egui::Vec2b;
@@ -84,7 +84,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                     let line =
                         egui_plot::Line::new(PlotPoints::from_ys_f32(&rast)).name("rasterize");
                     ui.line(line);
-                    let line = 
+                    let line =
                         egui_plot::Line::new(PlotPoints::from_ys_f32(&smooth)).name("smoothing");
                     ui.line(line);
                 });
@@ -110,7 +110,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                 );
                 state.splatting_args.max_sh_deg = if dir_color { state.pc.sh_deg() } else { 0 };
 
-              
                 ui.end_row();
                 let enable_bg = !state.splatting_args.show_env_map && !state.display.has_env_map();
                 ui.add_enabled(enable_bg, egui::Label::new("Background Color"));
@@ -121,27 +120,6 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         egui::color_picker::Alpha::BlendOrAdditive,
                     )
                 });
-                ui.end_row();
-                ui.label("Current Frame Colour Weight");
-                ui.add_enabled(true,
-                    egui::DragValue::new(&mut state.splatting_args.current_colour_weight)
-                        .clamp_range(0.0..=1.0)
-                        .speed(0.002),
-                );
-                ui.end_row();
-                ui.label("Depth Smoothing Cutoff");
-                ui.add_enabled(true,
-                    egui::DragValue::new(&mut state.splatting_args.depth_smoothing_high)
-                        .clamp_range(0.0..=10.0)
-                        .speed(0.0001),
-                );
-                ui.end_row();
-                ui.label("Color Smoothing Cutoff");
-                ui.add_enabled(true,
-                    egui::DragValue::new(&mut state.splatting_args.colour_smoothing_high)
-                        .clamp_range(0.0..=10.0)
-                        .speed(0.0001),
-                );
                 ui.end_row();
                 #[cfg(not(target_arch = "wasm32"))]
                 {
@@ -165,6 +143,75 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         &mut state.splatting_args.mip_splatting,
                         state.pc.mip_splatting().unwrap_or(false),
                     );
+                    ui.end_row();
+                }
+                {
+                    ui.strong("Temporal Stabilization Parameters");
+                    ui.end_row();
+                    ui.label("Current Frame Colour Weight");
+                    ui.add_enabled(
+                        true,
+                        egui::DragValue::new(
+                            &mut state.splatting_args.ts_parameters.current_frame_weight,
+                        )
+                        .clamp_range(0.0..=1.0)
+                        .speed(0.002),
+                    );
+                    ui.end_row();
+                    ui.label("Depth Difference Low and High Thresholds");
+                    ui.add_enabled(
+                        true,
+                        egui::DragValue::new(
+                            &mut state.splatting_args.ts_parameters.depth_diff_thresholds[0],
+                        )
+                        .clamp_range(0.0..=10.0)
+                        .speed(0.0001),
+                    );
+                    ui.add_enabled(
+                        true,
+                        egui::DragValue::new(
+                            &mut state.splatting_args.ts_parameters.depth_diff_thresholds[1],
+                        )
+                        .clamp_range(0.0..=10.0)
+                        .speed(0.0001),
+                    );
+                    ui.end_row();
+                    ui.label("Colour Difference Low and High Thresholds");
+                    ui.add_enabled(
+                        true,
+                        egui::DragValue::new(
+                            &mut state.splatting_args.ts_parameters.colour_diff_thresholds[0],
+                        )
+                        .clamp_range(0.0..=10.0)
+                        .speed(0.0001),
+                    );
+                    ui.add_enabled(
+                        true,
+                        egui::DragValue::new(
+                            &mut state.splatting_args.ts_parameters.colour_diff_thresholds[1],
+                        )
+                        .clamp_range(0.0..=10.0)
+                        .speed(0.0001),
+                    );
+                    ui.end_row();
+                    ui.label("Surface Normal Difference Low and High Thresholds");
+                    ui.add_enabled(
+                        true,
+                        egui::DragValue::new(
+                            &mut state.splatting_args.ts_parameters.normal_diff_thresholds[0],
+                        )
+                        .clamp_range(0.0..=10.0)
+                        .speed(0.0001),
+                    );
+                    ui.add_enabled(
+                        true,
+                        egui::DragValue::new(
+                            &mut state.splatting_args.ts_parameters.normal_diff_thresholds[1],
+                        )
+                        .clamp_range(0.0..=10.0)
+                        .speed(0.0001),
+                    );
+
                     ui.end_row();
                 }
             });
@@ -331,20 +378,23 @@ pub(crate) fn ui(state: &mut WindowContext) {
     //#[cfg(feature="debug-texture")]
     {
         egui::Window::new("Debug Output")
-        .default_width(200.)
-        .default_height(100.)
-        .resizable(true)
-        .show(
-            ctx, |ui| {
-                let tex_id = state.ui_renderer.renderer
-                .register_native_texture(&state.wgpu_context.device, 
+            .default_width(200.)
+            .default_height(100.)
+            .resizable(true)
+            .show(ctx, |ui| {
+                let tex_id = state.ui_renderer.renderer.register_native_texture(
+                    &state.wgpu_context.device,
                     &state.display.in_dbg_tex(),
-                    wgpu::FilterMode::Linear);
-                    ui.add(
-                        egui::widgets::Image::from_texture((tex_id, egui::Vec2::new(state.config.width as f32/2., state.config.height as f32/2.)))
-                    );
-            }
-        );
+                    wgpu::FilterMode::Linear,
+                );
+                ui.add(egui::widgets::Image::from_texture((
+                    tex_id,
+                    egui::Vec2::new(
+                        state.config.width as f32 / 2.,
+                        state.config.height as f32 / 2.,
+                    ),
+                )));
+            });
     }
 
     #[cfg(target_arch = "wasm32")]

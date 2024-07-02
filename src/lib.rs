@@ -9,8 +9,7 @@ use std::{
 use image::Pixel;
 #[cfg(target_arch = "wasm32")]
 use instant::{Duration, Instant};
-use renderer::{Display, GRPTextures};
-use serde::de;
+use renderer::Display;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::{Duration, Instant};
 use wgpu::{util::DeviceExt, Backends, Extent3d};
@@ -301,9 +300,7 @@ impl WindowContext {
                 walltime: Duration::ZERO,
                 scene_center: None,
                 scene_extend: None,
-                current_colour_weight: TemporalSmoothing::CURRENT_COLOUR_WEIGHT,
-                colour_smoothing_high: TemporalSmoothing::COLOUR_SMOOTHING_HIGH,
-                depth_smoothing_high: TemporalSmoothing::DEPTH_SMOOTHING_HIGH,
+                ts_parameters: Default::default()
             },
             pc,
             // camera: view_camera,

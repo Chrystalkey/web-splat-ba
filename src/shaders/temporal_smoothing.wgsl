@@ -8,6 +8,14 @@ struct CameraUniforms {
     focal: vec2<f32>
 };
 
+struct TSParameters{
+    depth_diff_thresholds: vec2<f32>,
+    colour_diff_thresholds: vec2<f32>,
+    normal_diff_thresholds: vec2<f32>,
+    current_frame_weight: f32,
+    _pad: f32
+}
+
 struct RenderSettings {
     clipping_box_min: vec4<f32>,
     clipping_box_max: vec4<f32>,
@@ -18,9 +26,7 @@ struct RenderSettings {
     kernel_size: f32,
     walltime: f32,
     scene_extend: f32,
-    current_colour_weight: f32, // could be interesting to have this as a ui parameter
-    depth_smoothing_high: f32,
-    colour_smoothing_high: f32,
+    ts_parameters: TSParameters,
     center: vec3<f32>,
 };
 
@@ -92,30 +98,47 @@ fn colour_difference(curr: vec3<f32>, accu: vec3<f32>) -> f32 {
     // return abs(ahsv.r - chsv.r); // well, kinda useless
 }
 
-// stands for debug colour output
+fn normvec(coord: vec2<f32>, alpha: f32) -> vec3<f32> {
+    let tdim = vec2<f32>(textureDimensions(currentFrameTexture).xy);
+    let coord_denorm = coord * tdim;
+    let udiff = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(1., 0.)) / tdim, 0.).r;
+    let ddiff = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(-1., 0.)) / tdim, 0.).r;
+    let rdiff = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(0., 1.)) / tdim, 0.).r;
+    let ldiff = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(0., -1.)) / tdim, 0.).r;
+    return normalize(abs(vec3(udiff - ddiff, rdiff - ldiff, alpha) / alpha));
+}
+
+// stands for debug-enabled colour output
 struct DCO {
     colour: vec4<f32>,
     debug: vec4<f32>,
 }
 
 // useful thresholds: depth_diff ~.005, colour_diff ~.4
-
+const DEPTH_SMOOTHING_HIGH : f32 = 0.005;
+const COLOUR_SMOOTHING_HIGH : f32 = 0.4;
 fn blend(c_col: vec4<f32>, c_depth: f32,
     a_col: vec4<f32>, a_depth: f32,
+    surface_normal: vec3<f32>,
     alpha: f32,
     depth_variance: f32) -> DCO {
     let depth_diff = abs(a_depth - c_depth);
 
     let colour_diff = colour_difference(c_col.rgb, a_col.rgb);
     //return vec4<f32>(depth_diff*100., colour_diff, 0., 1.); // cool effect, though
+    let normal_diff = dot(surface_normal, vec3<f32>(0., 0., 1));
+
+
     var colour = c_col;
     var debug = BLACK;
+    let ts_p = render_settings.ts_parameters;
 
-    let dd_coeff = 1. - smoothstep(0., render_settings.depth_smoothing_high, depth_diff);
-    let cd_coeff = smoothstep(0., render_settings.colour_smoothing_high, colour_diff);
+    let dd_coeff = 1. - smoothstep(ts_p.depth_diff_thresholds.x, ts_p.depth_diff_thresholds.y, depth_diff);
+    let cd_coeff = smoothstep(ts_p.colour_diff_thresholds.x, ts_p.colour_diff_thresholds.y, colour_diff);
     let vr_coeff = smoothstep(0., 0.01, sqrt(depth_variance));
-    let mix_coeff = (dd_coeff * cd_coeff) * (dd_coeff * cd_coeff);
-    let mix_col = mix(a_col, c_col, render_settings.current_colour_weight);
+    let nm_coeff = 1. - smoothstep(ts_p.normal_diff_thresholds.x, ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
+    let mix_coeff = (dd_coeff * cd_coeff) * (dd_coeff * cd_coeff) * nm_coeff * vr_coeff;
+    let mix_col = mix(a_col, c_col, ts_p.current_frame_weight);
     colour = mix(c_col, mix_col, mix_coeff);
     debug = mix(BLACK, vec4(1., 0., 0., 1.), mix_coeff);
     // if depth_diff < render_settings.depth_smoothing_high && colour_diff > render_settings.colour_smoothing_high {
@@ -183,9 +206,15 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     if reproj_pos.x >= 0 && reproj_pos.x < 1. && reproj_pos.y >= 0 && reproj_pos.y < 1. {
         let accu_colour = textureSampleLevel(accuTexture, filter_sampler, reproj_pos, 0.);
         let accu_depth = textureSampleLevel(accuDepth, filter_sampler, reproj_pos, 0.).r;// here the alpha is pre-filtered out, in contrast to the current depth
-        output = blend(current_colour, current_depth, accu_colour, accu_depth, depth_raw.g, current_depth_variance);
+        let surface_normal = normvec(current_normalized_position, depth_raw.g); // estimated surface normal
+        output = blend(
+            current_colour, current_depth, accu_colour, accu_depth,
+            surface_normal,
+            depth_raw.g, current_depth_variance
+        );
         //output = DCO(output.colour, vec4<f32>(output.debug.r, sqrt(current_depth_variance)*100., 0., 1.)); // premultiplied alpha
     }
+    // output.debug = vec4<f32>(normvec(current_normalized_position, depth_raw.g), 1.); // normal vector debug
     // final_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance)* 100), 1.);  // depth variance 
     // final_colour = vec4<f32>(vec3<f32>(current_depth_mean/100.), 1.);            // depth mean value
     // final_colour = vec4<f32>(vec3<f32>(current_depth), 1.);                      // blended depth value

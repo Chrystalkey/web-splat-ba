@@ -11,8 +11,6 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::time::Duration;
 
-use egui::output;
-use egui_wgpu::WgpuConfiguration;
 use wgpu::{include_wgsl, Extent3d, MultisampleState};
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector4};
@@ -942,13 +940,11 @@ impl Display {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[
-                    Some(wgpu::ColorTargetState {
-                        format: target_format,
-                        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    }),
-                ],
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: target_format,
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
             }),
             multiview: None,
         });
@@ -1210,16 +1206,14 @@ impl Display {
     ) {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("render pass"),
-            color_attachments: &[
-                Some(wgpu::RenderPassColorAttachment {
-                    view: target.0,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(background_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                }),
-            ],
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.0,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(background_color),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
             ..Default::default()
         });
         render_pass.set_bind_group(0, &self.bind_group, &[]);
@@ -1229,6 +1223,33 @@ impl Display {
         render_pass.set_pipeline(&self.pipeline);
 
         render_pass.draw(0..4, 0..1);
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct TSParameters {
+    pub depth_diff_thresholds: Vector2<f32>,
+    pub colour_diff_thresholds: Vector2<f32>,
+    pub normal_diff_thresholds: Vector2<f32>,
+    pub current_frame_weight: f32,
+}
+impl Default for TSParameters{
+    fn default() -> Self {
+        Self {
+            depth_diff_thresholds: Vector2::new(0.00, TemporalSmoothing::DEPTH_SMOOTHING_HIGH),
+            colour_diff_thresholds: Vector2::new(0.00, TemporalSmoothing::COLOUR_SMOOTHING_HIGH),
+            normal_diff_thresholds: Vector2::new(0.00, 1.),
+            current_frame_weight: TemporalSmoothing::CURRENT_COLOUR_WEIGHT,
+        }
+    }
+}
+impl Hash for TSParameters {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        bytemuck::bytes_of(&self.depth_diff_thresholds).hash(state);
+        bytemuck::bytes_of(&self.colour_diff_thresholds).hash(state);
+        bytemuck::bytes_of(&self.normal_diff_thresholds).hash(state);
+        bytemuck::bytes_of(&self.current_frame_weight).hash(state);
     }
 }
 
@@ -1246,9 +1267,7 @@ pub struct SplattingArgs {
     pub walltime: Duration,
     pub scene_center: Option<Point3<f32>>,
     pub scene_extend: Option<f32>,
-    pub current_colour_weight: f32,
-    pub depth_smoothing_high: f32,
-    pub colour_smoothing_high: f32,
+    pub ts_parameters: TSParameters,
 }
 
 impl Hash for SplattingArgs {
@@ -1269,8 +1288,6 @@ impl Hash for SplattingArgs {
             .as_ref()
             .map(|b| bytemuck::bytes_of(&b.max))
             .hash(state);
-
-        bytemuck::bytes_of(&self.current_colour_weight).hash(state);
     }
 }
 
@@ -1290,12 +1307,10 @@ pub struct SplattingArgsUniform {
     walltime: f32,
     scene_extend: f32,
 
-    current_coulour_weight: f32,
-    depth_smoothing_high: f32,
-    colour_smoothing_high: f32,
-    _padding: [f32; 2],
+    ts_parameters: TSParameters,
 
     scene_center: Vector4<f32>,
+    _padding: [f32; 3],
 }
 
 impl SplattingArgsUniform {
@@ -1328,9 +1343,7 @@ impl SplattingArgsUniform {
                 .scene_extend
                 .unwrap_or(pc.bbox().radius())
                 .max(pc.bbox().radius()),
-            current_coulour_weight: args.current_colour_weight,
-            colour_smoothing_high: args.colour_smoothing_high,
-            depth_smoothing_high: args.depth_smoothing_high,
+            ts_parameters: args.ts_parameters,
             ..Default::default()
         }
     }
@@ -1354,10 +1367,8 @@ impl Default for SplattingArgsUniform {
             walltime: 0.,
             scene_center: Vector4::new(0., 0., 0., 0.),
             scene_extend: 1.,
-            current_coulour_weight: TemporalSmoothing::CURRENT_COLOUR_WEIGHT,
-            colour_smoothing_high: TemporalSmoothing::COLOUR_SMOOTHING_HIGH,
-            depth_smoothing_high: TemporalSmoothing::DEPTH_SMOOTHING_HIGH,
-            _padding: [0.; 2],
+            ts_parameters: TSParameters::default(),
+            _padding: [0.; 3],
         }
     }
 }

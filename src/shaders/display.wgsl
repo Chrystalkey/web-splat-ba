@@ -44,7 +44,6 @@ struct VertexOut {
 fn vs_main(
     @builtin(vertex_index) in_vertex_index: u32,
 ) -> VertexOut {
-
     // creates two vertices that cover the whole screen
     let xy = vec2<f32>(
         f32(in_vertex_index % 2u == 0u),
