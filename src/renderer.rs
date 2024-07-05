@@ -11,7 +11,7 @@ use std::hash::{Hash, Hasher};
 use std::num::NonZeroU64;
 use std::time::Duration;
 
-use wgpu::{include_wgsl, Extent3d, MultisampleState};
+use wgpu::{include_wgsl, Extent3d, MultisampleState, ShaderModuleDescriptor};
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector2, Vector4};
 
@@ -596,14 +596,7 @@ impl TemporalSmoothing {
         })
     }
 
-    pub fn new(
-        device: &wgpu::Device,
-        output_texture: &wgpu::TextureView,
-        output_depth: &wgpu::TextureView,
-        output_debug: &wgpu::TextureView,
-        width: u32,
-        height: u32,
-    ) -> Self {
+    pub fn create_pipeline(device: &wgpu::Device) -> wgpu::ComputePipeline {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Temporal Smoothing"),
             bind_group_layouts: &[
@@ -614,14 +607,34 @@ impl TemporalSmoothing {
             ],
             push_constant_ranges: &[],
         });
-        let shader = device.create_shader_module(include_wgsl!("shaders/temporal_smoothing.wgsl"));
+        let shader = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("Temporal Smoothing"),
+            source: wgpu::ShaderSource::Wgsl(
+                std::fs::read_to_string("src/shaders/temporal_smoothing.wgsl")
+                    .unwrap()
+                    .into(),
+            ),
+        });
 
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("Temporal Smoothing"),
             layout: Some(&pipeline_layout),
             module: &shader,
             entry_point: "cs_main",
-        });
+        })
+    }
+    pub fn reload_shaders(&mut self, device: &wgpu::Device) {
+        self.pipeline = Self::create_pipeline(device);
+    }
+    pub fn new(
+        device: &wgpu::Device,
+        output_texture: &wgpu::TextureView,
+        output_depth: &wgpu::TextureView,
+        output_debug: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let pipeline = Self::create_pipeline(device);
         let reprojection_data =
             UniformBuffer::new_default(device, Some("accu frame transformation"));
         let (grp_textures, accu_frame, accu_depth, sampler, bind_group) =
@@ -1234,7 +1247,7 @@ pub struct TSParameters {
     pub normal_diff_thresholds: Vector2<f32>,
     pub current_frame_weight: f32,
 }
-impl Default for TSParameters{
+impl Default for TSParameters {
     fn default() -> Self {
         Self {
             depth_diff_thresholds: Vector2::new(0.00, TemporalSmoothing::DEPTH_SMOOTHING_HIGH),

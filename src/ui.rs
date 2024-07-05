@@ -211,6 +211,11 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         .clamp_range(0.0..=10.0)
                         .speed(0.0001),
                     );
+                    if ui.button("Reload TS Shaders").clicked() {
+                        state
+                            .temp_smoother
+                            .reload_shaders(&state.wgpu_context.device);
+                    }
 
                     ui.end_row();
                 }

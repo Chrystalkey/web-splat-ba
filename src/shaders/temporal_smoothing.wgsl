@@ -8,7 +8,7 @@ struct CameraUniforms {
     focal: vec2<f32>
 };
 
-struct TSParameters{
+struct TSParameters {
     depth_diff_thresholds: vec2<f32>,
     colour_diff_thresholds: vec2<f32>,
     normal_diff_thresholds: vec2<f32>,
@@ -140,14 +140,10 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     let mix_coeff = (dd_coeff * cd_coeff) * (dd_coeff * cd_coeff) * nm_coeff * vr_coeff;
     let mix_col = mix(a_col, c_col, ts_p.current_frame_weight);
     colour = mix(c_col, mix_col, mix_coeff);
-    debug = mix(BLACK, vec4(1., 0., 0., 1.), mix_coeff);
-    // if depth_diff < render_settings.depth_smoothing_high && colour_diff > render_settings.colour_smoothing_high {
-    //     debug = vec4(0.5, 1., 1., 1.);
-    //     colour = mix(a_col, c_col, render_settings.current_colour_weight);
-    // } else {
-    //     debug = BLACK;
-    //     colour = c_col;
-    // }
+    // debug = vec4<f32>((a_depth - 10.) / 10., 0., 0., 1.);
+    debug = vec4<f32>(surface_normal, 1.); // estimated surface normals
+    // debug = mix(BLACK, vec4(1., 0., 0., 1.), mix_coeff);
+
     return DCO(colour, debug);
 }
 
