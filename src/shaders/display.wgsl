@@ -11,11 +11,28 @@ struct CameraUniforms {
     focal: vec2<f32>
 };
 
+struct TSParameters {
+    depth_diff_thresholds: vec2<f32>,
+    colour_diff_thresholds: vec2<f32>,
+    normal_diff_thresholds: vec2<f32>,
+    current_frame_weight: f32,
+    _pad: f32
+}
+
 
 struct RenderSettings {
+    ts_parameters: TSParameters,
+    clipping_box_min: vec4<f32>,
+    clipping_box_max: vec4<f32>,
+    center: vec3<f32>,
+    _padding : f32,
     gaussian_scaling: f32,
+    kernel_size: f32,
+    walltime: f32,
+    scene_extend: f32,
     max_sh_deg: u32,
     show_env_map: u32,
+    mip_spatting: u32,
 }
 
 @group(0) @binding(0)

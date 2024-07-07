@@ -17,18 +17,19 @@ struct TSParameters {
 }
 
 struct RenderSettings {
+    ts_parameters: TSParameters,
     clipping_box_min: vec4<f32>,
     clipping_box_max: vec4<f32>,
+    center: vec3<f32>,
+    _padding : f32,
     gaussian_scaling: f32,
-    max_sh_deg: u32,
-    show_env_map: u32,
-    mip_spatting: u32,
     kernel_size: f32,
     walltime: f32,
     scene_extend: f32,
-    ts_parameters: TSParameters,
-    center: vec3<f32>,
-};
+    max_sh_deg: u32,
+    show_env_map: u32,
+    mip_spatting: u32,
+}
 
 struct ReprojectionData {
     vp_accu: mat4x4<f32>,
@@ -65,6 +66,7 @@ struct ReprojectionData {
 const EPSILON = 1e-5;
 const VARIANCE_K = 2.;
 const BLACK = vec4<f32>(0., 0., 0., 1.);
+const PI = 3.14159265359;
 
 fn rgb2hsv(c: vec3<f32>) -> vec3<f32> {
     let K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -75,13 +77,6 @@ fn rgb2hsv(c: vec3<f32>) -> vec3<f32> {
     let e = 1.0e-10;
     return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
 }
-
-// TODO: find a useful function
-// Questions:
-// - influence of alpha value
-// - manhattan or euclidean distance?
-// - how to weight the colour difference(hue/saturation/value or r/g/b)
-// - normalizing colours?
 
 // trial set dimensions
 // distance() always divide by sqrt(3) because distance([0,0,0], [1,1,1] = sqrt(3) and thus it is normalized
@@ -101,11 +96,18 @@ fn colour_difference(curr: vec3<f32>, accu: vec3<f32>) -> f32 {
 fn normvec(coord: vec2<f32>, alpha: f32) -> vec3<f32> {
     let tdim = vec2<f32>(textureDimensions(currentFrameTexture).xy);
     let coord_denorm = coord * tdim;
-    let udiff = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(1., 0.)) / tdim, 0.).r;
-    let ddiff = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(-1., 0.)) / tdim, 0.).r;
-    let rdiff = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(0., 1.)) / tdim, 0.).r;
-    let ldiff = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(0., -1.)) / tdim, 0.).r;
-    return normalize(abs(vec3(udiff - ddiff, rdiff - ldiff, alpha) / alpha));
+    let up = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(1., 0.)) / tdim, 0.).r;
+    let dn = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(-1., 0.)) / tdim, 0.).r;
+    let rt = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(0., 1.)) / tdim, 0.).r;
+    let lt = textureSampleLevel(currentFrameDepthTexture, filter_sampler, (coord_denorm + vec2(0., -1.)) / tdim, 0.).r;
+    let dp = textureSampleLevel(currentFrameDepthTexture, filter_sampler, coord_denorm / tdim, 0.).r; 
+
+    // est. central difference
+    return normalize(abs(vec3(up - dn, rt - lt, alpha / 4.) / alpha)); // I just guessed this four, makes the actual borders more pronounced
+    // forward difference
+    //return normalize(abs(vec3(up - dp, lt-dp, alpha) / alpha));
+    // forward difference
+    // return normalize(abs(vec3(dp - dn, dp - rt, alpha) / alpha));
 }
 
 // stands for debug-enabled colour output
@@ -115,8 +117,6 @@ struct DCO {
 }
 
 // useful thresholds: depth_diff ~.005, colour_diff ~.4
-const DEPTH_SMOOTHING_HIGH : f32 = 0.005;
-const COLOUR_SMOOTHING_HIGH : f32 = 0.4;
 fn blend(c_col: vec4<f32>, c_depth: f32,
     a_col: vec4<f32>, a_depth: f32,
     surface_normal: vec3<f32>,
@@ -126,23 +126,31 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
 
     let colour_diff = colour_difference(c_col.rgb, a_col.rgb);
     //return vec4<f32>(depth_diff*100., colour_diff, 0., 1.); // cool effect, though
-    let normal_diff = dot(surface_normal, vec3<f32>(0., 0., 1));
+    let normal_diff = acos(dot(surface_normal, vec3<f32>(0., 0., 1.))) / 2 * PI; // value range from 0 to 2 * PI
 
 
     var colour = c_col;
     var debug = BLACK;
     let ts_p = render_settings.ts_parameters;
-
+    
     let dd_coeff = 1. - smoothstep(ts_p.depth_diff_thresholds.x, ts_p.depth_diff_thresholds.y, depth_diff);
     let cd_coeff = smoothstep(ts_p.colour_diff_thresholds.x, ts_p.colour_diff_thresholds.y, colour_diff);
     let vr_coeff = smoothstep(0., 0.01, sqrt(depth_variance));
     let nm_coeff = 1. - smoothstep(ts_p.normal_diff_thresholds.x, ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
-    let mix_coeff = (dd_coeff * cd_coeff) * (dd_coeff * cd_coeff) * nm_coeff * vr_coeff;
-    let mix_col = mix(a_col, c_col, ts_p.current_frame_weight);
+
+    // let dd_coeff = 1. - step(ts_p.depth_diff_thresholds.y, depth_diff);
+    // let cd_coeff = step(ts_p.colour_diff_thresholds.y, colour_diff);
+    // let vr_coeff = step(0.01, sqrt(depth_variance));
+    // let nm_coeff = 1. - step(ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
+    
+    let mix_coeff = (dd_coeff * cd_coeff) * nm_coeff;
+
+    let mix_col = mix(a_col, c_col, .1);
     colour = mix(c_col, mix_col, mix_coeff);
     // debug = vec4<f32>((a_depth - 10.) / 10., 0., 0., 1.);
-    debug = vec4<f32>(surface_normal, 1.); // estimated surface normals
-    // debug = mix(BLACK, vec4(1., 0., 0., 1.), mix_coeff);
+    //debug = vec4<f32>(surface_normal, 1.); // estimated surface normals
+    
+    debug = mix(debug, vec4(0., 1., 0., 1.), ts_p.colour_diff_thresholds.y);
 
     return DCO(colour, debug);
 }

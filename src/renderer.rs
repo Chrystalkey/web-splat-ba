@@ -485,9 +485,9 @@ impl TemporalSmoothing {
     pub const OUT_TEXTURE_FORMAT_COL: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
     pub const OUT_TEXTURE_FORMAT_DEP: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
     pub const PIXELS_PER_COMPUTE_AXIS: u32 = 4;
-    pub const CURRENT_COLOUR_WEIGHT: f32 = 0.1;
-    pub const COLOUR_SMOOTHING_HIGH: f32 = 0.4;
-    pub const DEPTH_SMOOTHING_HIGH: f32 = 5e-3;
+    //pub const CURRENT_COLOUR_WEIGHT: f32 = 0.1;
+    //pub const COLOUR_SMOOTHING_HIGH: f32 = 0.4;
+    //pub const DEPTH_SMOOTHING_HIGH: f32 = 5e-3;
 
     pub fn input_textures(&self) -> &GRPTextures {
         &self.grp_textures
@@ -1246,14 +1246,16 @@ pub struct TSParameters {
     pub colour_diff_thresholds: Vector2<f32>,
     pub normal_diff_thresholds: Vector2<f32>,
     pub current_frame_weight: f32,
+    pub _padding: f32,
 }
 impl Default for TSParameters {
     fn default() -> Self {
         Self {
-            depth_diff_thresholds: Vector2::new(0.00, TemporalSmoothing::DEPTH_SMOOTHING_HIGH),
-            colour_diff_thresholds: Vector2::new(0.00, TemporalSmoothing::COLOUR_SMOOTHING_HIGH),
+            depth_diff_thresholds: Vector2::new(0.00, 0.005),
+            colour_diff_thresholds: Vector2::new(0.00, 0.4),
             normal_diff_thresholds: Vector2::new(0.00, 1.),
-            current_frame_weight: TemporalSmoothing::CURRENT_COLOUR_WEIGHT,
+            current_frame_weight: 0.1,
+            _padding: 0.,
         }
     }
 }
@@ -1309,21 +1311,19 @@ pub const DEFAULT_KERNEL_SIZE: f32 = 0.3;
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SplattingArgsUniform {
+    ts_parameters: TSParameters,
     clipping_box_min: Vector4<f32>,
     clipping_box_max: Vector4<f32>,
+    scene_center: Vector4<f32>,
     gaussian_scaling: f32,
+    kernel_size: f32,
+    walltime: f32,
+    scene_extend: f32,
     max_sh_deg: u32,
     show_env_map: u32,
     mip_splatting: u32,
 
-    kernel_size: f32,
-    walltime: f32,
-    scene_extend: f32,
-
-    ts_parameters: TSParameters,
-
-    scene_center: Vector4<f32>,
-    _padding: [f32; 3],
+    _padding: f32,
 }
 
 impl SplattingArgsUniform {
@@ -1381,7 +1381,7 @@ impl Default for SplattingArgsUniform {
             scene_center: Vector4::new(0., 0., 0., 0.),
             scene_extend: 1.,
             ts_parameters: TSParameters::default(),
-            _padding: [0.; 3],
+            _padding: 0.
         }
     }
 }

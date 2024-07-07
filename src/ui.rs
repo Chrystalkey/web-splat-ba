@@ -211,6 +211,7 @@ pub(crate) fn ui(state: &mut WindowContext) {
                         .clamp_range(0.0..=10.0)
                         .speed(0.0001),
                     );
+                    ui.end_row();
                     if ui.button("Reload TS Shaders").clicked() {
                         state
                             .temp_smoother
