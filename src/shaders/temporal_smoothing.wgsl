@@ -145,7 +145,8 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     
     let mix_coeff = (dd_coeff * cd_coeff) * nm_coeff;
 
-    let mix_col = mix(a_col, c_col, .1);
+
+    let mix_col = mix(a_col, c_col, ts_p.current_frame_weight);
     colour = mix(c_col, mix_col, mix_coeff);
     // debug = vec4<f32>((a_depth - 10.) / 10., 0., 0., 1.);
     //debug = vec4<f32>(surface_normal, 1.); // estimated surface normals
