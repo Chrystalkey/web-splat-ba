@@ -133,15 +133,15 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     var debug = BLACK;
     let ts_p = render_settings.ts_parameters;
     
-    let dd_coeff = 1. - smoothstep(ts_p.depth_diff_thresholds.x, ts_p.depth_diff_thresholds.y, depth_diff);
-    let cd_coeff = smoothstep(ts_p.colour_diff_thresholds.x, ts_p.colour_diff_thresholds.y, colour_diff);
-    let vr_coeff = smoothstep(0., 0.01, sqrt(depth_variance));
-    let nm_coeff = 1. - smoothstep(ts_p.normal_diff_thresholds.x, ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
+    // let dd_coeff = 1. - smoothstep(ts_p.depth_diff_thresholds.x, ts_p.depth_diff_thresholds.y, depth_diff);
+    // let cd_coeff = smoothstep(ts_p.colour_diff_thresholds.x, ts_p.colour_diff_thresholds.y, colour_diff);
+    // let vr_coeff = smoothstep(0.0030, 0.0035, sqrt(depth_variance));
+    // let nm_coeff = 1. - smoothstep(ts_p.normal_diff_thresholds.x, ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
 
-    // let dd_coeff = 1. - step(ts_p.depth_diff_thresholds.y, depth_diff);
-    // let cd_coeff = step(ts_p.colour_diff_thresholds.y, colour_diff);
-    // let vr_coeff = step(0.01, sqrt(depth_variance));
-    // let nm_coeff = 1. - step(ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
+    let dd_coeff = 1. - step(ts_p.depth_diff_thresholds.y, depth_diff);
+    let cd_coeff = step(ts_p.colour_diff_thresholds.y, colour_diff);
+    let vr_coeff = step(0.0035, sqrt(depth_variance));
+    let nm_coeff = 1. - step(ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
     
     let mix_coeff = (dd_coeff * cd_coeff) * nm_coeff;
 
@@ -151,7 +151,7 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     // debug = vec4<f32>((a_depth - 10.) / 10., 0., 0., 1.);
     //debug = vec4<f32>(surface_normal, 1.); // estimated surface normals
     
-    debug = mix(debug, vec4(0., 1., 0., 1.), ts_p.colour_diff_thresholds.y);
+    debug = vec4(mix_coeff, 0., 0., 1.);
 
     return DCO(colour, debug);
 }

@@ -1251,9 +1251,9 @@ pub struct TSParameters {
 impl Default for TSParameters {
     fn default() -> Self {
         Self {
-            depth_diff_thresholds: Vector2::new(0.00, 0.005),
-            colour_diff_thresholds: Vector2::new(0.00, 0.4),
-            normal_diff_thresholds: Vector2::new(0.00, 1.),
+            depth_diff_thresholds: Vector2::new(0.0004, 0.0005),
+            colour_diff_thresholds: Vector2::new(0.09, 0.1),
+            normal_diff_thresholds: Vector2::new(0.04, 0.5),
             current_frame_weight: 0.1,
             _padding: 0.,
         }
