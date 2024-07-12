@@ -101,9 +101,7 @@ async fn render_views(
                 walltime: Duration::from_secs(100),
                 scene_center: None,
                 scene_extend: None,
-                current_colour_weight: 1.,
-                colour_smoothing_high: 1.,
-                depth_smoothing_high: 1.,
+                ts_parameters: Default::default()
             },
             &mut None,
         );

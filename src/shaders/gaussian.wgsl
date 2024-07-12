@@ -67,7 +67,14 @@ fn vs_main(
 }
 
 const VARIANCE_K: f32 = 2.;
+// TODO: Depth Calculation Experiments
+// Ideas:
+// a: use the mean depth of the gaussian splat as we do right now
+// b: use the depth calculation from the paper
 
+// 1. use alpha blending as we do now
+// 2. use let the depth behave like opaque objects and use min
+// 3. use mean of depth - x sd of depth
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOut {
     let a = dot(in.screen_pos, in.screen_pos);
@@ -88,6 +95,7 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
         depth_adjusted*depth_adjusted,
         b
     );
+    
     let depth_return = vec4<f32>(
         in.depth*b,
         b,
