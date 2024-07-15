@@ -21,7 +21,7 @@ struct RenderSettings {
     clipping_box_min: vec4<f32>,
     clipping_box_max: vec4<f32>,
     center: vec3<f32>,
-    _padding : f32,
+    _padding: f32,
     gaussian_scaling: f32,
     kernel_size: f32,
     walltime: f32,
@@ -103,7 +103,7 @@ fn normvec(coord: vec2<f32>, alpha: f32) -> vec3<f32> {
     let dp = textureSampleLevel(currentFrameDepthTexture, filter_sampler, coord_denorm / tdim, 0.).r; 
 
     // est. central difference
-    return normalize(abs(vec3(up - dn, rt - lt, alpha / 4.) / alpha)); // I just guessed this four, makes the actual borders more pronounced
+    return normalize(abs(vec3(up - dn, rt - lt, alpha / 4.) / alpha)); // I just guessed this 4., makes the actual borders more pronounced
     // forward difference
     //return normalize(abs(vec3(up - dp, lt-dp, alpha) / alpha));
     // forward difference
@@ -142,7 +142,7 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     let cd_coeff = step(ts_p.colour_diff_thresholds.y, colour_diff);
     let vr_coeff = step(0.0035, sqrt(depth_variance));
     let nm_coeff = 1. - step(ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
-    
+
     let mix_coeff = (dd_coeff * cd_coeff) * nm_coeff;
 
 
@@ -150,7 +150,7 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     colour = mix(c_col, mix_col, mix_coeff);
     // debug = vec4<f32>((a_depth - 10.) / 10., 0., 0., 1.);
     //debug = vec4<f32>(surface_normal, 1.); // estimated surface normals
-    
+
     debug = vec4(mix_coeff, 0., 0., 1.);
 
     return DCO(colour, debug);
@@ -189,7 +189,8 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let current_depth_variance = current_depth_stats.g;
 
     let depth_raw = textureSampleLevel(currentFrameDepthTexture, filter_sampler, current_normalized_position, 0.);
-    let current_depth = depth_raw.r / depth_raw.g; // premultiplied alpha
+    //let current_depth = depth_raw.r / depth_raw.g; // premultiplied alpha
+    let current_depth = depth_raw.r;
     // end of depth calculation
 
     // ndc
@@ -217,12 +218,12 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
             surface_normal,
             depth_raw.g, current_depth_variance
         );
-        //output = DCO(output.colour, vec4<f32>(output.debug.r, sqrt(current_depth_variance)*100., 0., 1.)); // premultiplied alpha
     }
+    output.debug = vec4<f32>(vec3(current_depth / 50.), 1.);
     // output.debug = vec4<f32>(normvec(current_normalized_position, depth_raw.g), 1.); // normal vector debug
-    // final_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance)* 100), 1.);  // depth variance 
-    // final_colour = vec4<f32>(vec3<f32>(current_depth_mean/100.), 1.);            // depth mean value
-    // final_colour = vec4<f32>(vec3<f32>(current_depth), 1.);                      // blended depth value
+    // final_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance)* 100), 1.);      // depth variance 
+    // final_colour = vec4<f32>(vec3<f32>(current_depth_mean/100.), 1.);                // depth mean value
+    // final_colour = vec4<f32>(vec3<f32>(current_depth), 1.);                          // blended depth value
 
     // write the texture points into the receiving buffers
     textureStore(debug_output, current_position, output.debug);

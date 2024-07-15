@@ -97,7 +97,7 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     );
     
     let depth_return = vec4<f32>(
-        in.depth*b,
+        in.depth,
         b,
         0.,
         b

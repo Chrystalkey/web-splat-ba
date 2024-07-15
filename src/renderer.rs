@@ -66,6 +66,7 @@ impl GaussianRenderer {
                         blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
+                    // this is the statistics output 
                     Some(wgpu::ColorTargetState {
                         format: GRPTextures::DEPTH_FORMAT,
                         blend: Some(wgpu::BlendState {
@@ -82,6 +83,7 @@ impl GaussianRenderer {
                         }),
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
+                    // this is the depth value output
                     Some(wgpu::ColorTargetState {
                         format: GRPTextures::DEPTH_FORMAT,
                         blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
