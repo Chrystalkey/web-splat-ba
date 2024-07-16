@@ -1,6 +1,16 @@
 // we cutoff at 1/255 alpha value 
 const CUTOFF:f32 = 2.3539888583335364; // = sqrt(log(255))
 
+struct CameraUniforms {
+    view: mat4x4<f32>,
+    view_inv: mat4x4<f32>,
+    proj: mat4x4<f32>,
+    proj_inv: mat4x4<f32>,
+    
+    viewport: vec2<f32>,
+    focal: vec2<f32>
+};
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) screen_pos: vec2<f32>,
@@ -36,6 +46,8 @@ var<storage, read> points_2d : array<Splat>;
 @group(1) @binding(4)
 var<storage, read> indices : array<u32>;
 
+@group(2) @binding(0) var<uniform> camera: CameraUniforms;
+
 @vertex
 fn vs_main(
     @builtin(vertex_index) in_vertex_index: u32,
@@ -66,6 +78,33 @@ fn vs_main(
     return out;
 }
 
+// origin is the screen coordinate in world space
+// pos is the camera position
+fn ray_depth(origin: vec3<f32>, direction: vec3<f32>, scale: vec3<f32>) -> f32 {
+    let ror = origin;
+    let dir = normalize(direction);
+    let a = (dir.x * dir.x) / (scale.x * scale.x) + (dir.y * dir.y) / (scale.y * scale.y) + (dir.z * dir.z) / (scale.z * scale.z);
+    let b = 2 * (ror.x * dir.x / (scale.x * scale.x) + ror.y * dir.y / (scale.y * scale.y) + ror.z * dir.z / (scale.z * scale.z));
+    let c = (ror.x * ror.x) / (scale.x * scale.x) + (ror.y * ror.y) / (scale.y * scale.y) + (ror.z * ror.z) / (scale.z * scale.z) - 1;
+
+    let disc = b * b-4 * a * c;
+    if disc < 0. {
+        return 0.;
+    }
+    let t = (-b * 0.5 / a);
+    let p_mid = ror + t * dir;
+
+    return t;
+}
+
+fn calculate_adjusted_depth(splat: Splat, screen_pos: vec2<f32>) -> f32 {
+    // get screen pos into world space
+    let direction = vec3<f32>(screen_pos, 1.)-camera.origin; // TODO: Does not yet exist
+    // get screen pos into gaussian space
+    // ???
+    return ray_depth(vec3<f32>(0., 0., 0.), vec3<f32>(screen_pos, 1.), vec3<f32>(1., 1., 1.));
+}
+
 const VARIANCE_K: f32 = 2.;
 // TODO: Depth Calculation Experiments
 // Ideas:
@@ -92,10 +131,10 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     let depth_stat_return = vec4<f32>(
         1.,
         depth_adjusted,
-        depth_adjusted*depth_adjusted,
+        depth_adjusted * depth_adjusted,
         b
     );
-    
+
     let depth_return = vec4<f32>(
         in.depth,
         b,
