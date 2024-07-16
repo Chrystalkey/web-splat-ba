@@ -189,8 +189,12 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
     let current_depth_variance = current_depth_stats.g;
 
     let depth_raw = textureSampleLevel(currentFrameDepthTexture, filter_sampler, current_normalized_position, 0.);
-    //let current_depth = depth_raw.r / depth_raw.g; // premultiplied alpha
-    let current_depth = depth_raw.r;
+    // premult alpha blending
+    // let current_depth = depth_raw.r / depth_raw.g; // premultiplied alpha
+    // opaque objects
+    //let current_depth = depth_raw.r;
+    // mean +sd
+    let current_depth = current_depth_stats.x - sqrt(current_depth_stats.y);
     // end of depth calculation
 
     // ndc

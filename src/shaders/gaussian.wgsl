@@ -46,8 +46,14 @@ var<storage, read> points_2d : array<Splat>;
 @group(1) @binding(4)
 var<storage, read> indices : array<u32>;
 
-@group(2) @binding(0) var<uniform> camera: CameraUniforms;
+// @group(2) @binding(0) var<uniform> camera: CameraUniforms;
 
+
+// ideas how to calculate the intersection between the elipsis and the view ray:
+// - i have to do it in the fragment shader of this rp, because this is the spot where rasterization happens
+// - I do not have enough info to directly calculate this within the shader
+// 1. somehow deproject v1,v2 into world space using depth and position(?)
+// 2. while in preprocess, pass along another bit of info with which we can intersect the gaussians here
 @vertex
 fn vs_main(
     @builtin(vertex_index) in_vertex_index: u32,
@@ -97,13 +103,13 @@ fn ray_depth(origin: vec3<f32>, direction: vec3<f32>, scale: vec3<f32>) -> f32 {
     return t;
 }
 
-fn calculate_adjusted_depth(splat: Splat, screen_pos: vec2<f32>) -> f32 {
-    // get screen pos into world space
-    let direction = vec3<f32>(screen_pos, 1.)-camera.origin; // TODO: Does not yet exist
-    // get screen pos into gaussian space
-    // ???
-    return ray_depth(vec3<f32>(0., 0., 0.), vec3<f32>(screen_pos, 1.), vec3<f32>(1., 1., 1.));
-}
+// fn calculate_adjusted_depth(splat: Splat, screen_pos: vec2<f32>) -> f32 {
+//     // get screen pos into world space
+//     let direction = vec3<f32>(screen_pos, 1.)-camera.origin; // TODO: Does not yet exist
+//     // get screen pos into gaussian space
+//     // ???
+//     return ray_depth(vec3<f32>(0., 0., 0.), vec3<f32>(screen_pos, 1.), vec3<f32>(1., 1., 1.));
+// }
 
 const VARIANCE_K: f32 = 2.;
 // TODO: Depth Calculation Experiments
@@ -112,8 +118,9 @@ const VARIANCE_K: f32 = 2.;
 // b: use the depth calculation from the paper
 
 // 1. use alpha blending as we do now
-// 2. use let the depth behave like opaque objects and use min
+// 2. let the depth behave like opaque objects and use min (\alpha = 1)
 // 3. use mean of depth - x sd of depth
+
 @fragment
 fn fs_main(in: VertexOutput) -> FragmentOut {
     let a = dot(in.screen_pos, in.screen_pos);
@@ -135,11 +142,19 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
         b
     );
 
+    // premultiplied alphablending
     let depth_return = vec4<f32>(
-        in.depth,
+        in.depth*b,
         b,
         0.,
         b
+    );
+    // opaque objects
+    let depth_return_opq = vec4<f32>(
+        in.depth, 
+        b, 
+        0., 
+        1.
     );
 
     return FragmentOut(vec4<f32>(in.color.rgb, 1.) * b, depth_return, depth_stat_return);

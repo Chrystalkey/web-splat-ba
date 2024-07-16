@@ -46,8 +46,7 @@ struct Splat {
     // depth as plain f32
     depth: f32,
     // rgba packed as f16
-    color_0: u32,color_1: u32,
-    scale_sp: vec2<f32>
+    color_0: u32,color_1: u32
 };
 
 struct DrawIndirect {
