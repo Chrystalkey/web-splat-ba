@@ -22,7 +22,6 @@ const SH_C3 = array<f32,7>(
     -0.5900435899266435
 );
 
-
 struct CameraUniforms {
     view: mat4x4<f32>,
     view_inv: mat4x4<f32>,
@@ -35,10 +34,14 @@ struct CameraUniforms {
 
 struct Gaussian {
     pos_opacity: array<u32,2>,
-    cov: array<u32,3>
+    scale_rot: array<u32,4>,
 }
 
 struct Splat {
+    // this times the camera origin gives the co in adjusted gaussian space
+    co_transform: mat4x4<f32>,
+    // things for the depth calculation
+    scale_vec: vec3<f32>,
      // 4x f16 packed as u32
     v_0: u32, v_1: u32,
     // 2x f16 packed as u32
@@ -87,7 +90,7 @@ struct RenderSettings {
     clipping_box_min: vec4<f32>,
     clipping_box_max: vec4<f32>,
     center: vec3<f32>,
-    _padding : f32,
+    _padding: f32,
     gaussian_scaling: f32,
     kernel_size: f32,
     walltime: f32,
@@ -100,7 +103,7 @@ struct RenderSettings {
 @group(0) @binding(0)
 var<uniform> camera: CameraUniforms;
 
-@group(1) @binding(0) 
+@group(1) @binding(0)
 var<storage,read> gaussians : array<Gaussian>;
 @group(1) @binding(1) 
 var<storage,read> sh_coefs : array<array<u32,24>>;
@@ -164,12 +167,56 @@ fn evaluate_sh(dir: vec3<f32>, v_idx: u32, sh_deg: u32) -> vec3<f32> {
     return result;
 }
 
-fn cov_coefs(v_idx: u32) -> array<f32,6> {
-    let a = unpack2x16float(gaussians[v_idx].cov[0]);
-    let b = unpack2x16float(gaussians[v_idx].cov[1]);
-    let c = unpack2x16float(gaussians[v_idx].cov[2]);
-    return array<f32,6>(a.x, a.y, b.x, b.y, c.x, c.y);
+fn q2mat(rot: vec4<f32>) -> mat3x3<f32> {
+    let m11 = 2. * (rot.x * rot.x + rot.y * rot.y) - 1.;
+    let m12 = 2. * (rot.y * rot.z - rot.x * rot.w);
+    let m13 = 2. * (rot.y * rot.w + rot.x * rot.z);
+    let m21 = 2. * (rot.y * rot.z + rot.x * rot.w);
+    let m22 = 2. * (rot.x * rot.x + rot.z * rot.z) - 1.;
+    let m23 = 2. * (rot.z * rot.w - rot.x * rot.y);
+    let m31 = 2. * (rot.y * rot.w - rot.x * rot.z);
+    let m32 = 2. * (rot.z * rot.w + rot.x * rot.y);
+    let m33 = 2. * (rot.x * rot.x + rot.w * rot.w)-1.;
+    return mat3x3<f32>(
+        vec3<f32>(m11, m21, m31),
+        vec3<f32>(m12, m22, m32),
+        vec3<f32>(m13, m23, m33)
+    );
 }
+
+// calculates covariance matrix from quaternion rotation and scale vector
+fn build_cov(rot: vec4<f32>, scale: vec3<f32>) -> mat3x3<f32> {
+    let rmat = q2mat(rot);
+    let smat = mat3x3<f32>(
+        vec3<f32>(scale.x, 0., 0.),
+        vec3<f32>(0., scale.y, 0.),
+        vec3<f32>(0., 0., scale.z)
+    );
+    let l = rmat * smat;
+    let m = l * transpose(l);
+    return m;
+}
+
+// builds inverse camera origin transformation matrix 
+fn build_comat(rot: vec4<f32>, transl: vec3<f32>) -> mat4x4<f32> {
+    let q_norm = length(rot);
+    let inv_rot = vec4<f32>(-rot.x, -rot.y, -rot.z, rot.w) / q_norm;
+    let inv_rmat = q2mat(inv_rot);
+    let inv_transl = -transl;
+    return mat4x4<f32>(
+        vec4<f32>(inv_rmat[0], 0.),
+        vec4<f32>(inv_rmat[1], 0.),
+        vec4<f32>(inv_rmat[2], 0.),
+        vec4<f32>(inv_transl, 1.)
+    );
+}
+
+// fn cov_coefs(v_idx: u32) -> array<f32,6> {
+//     let a = unpack2x16float(gaussians[v_idx].cov[0]);
+//     let b = unpack2x16float(gaussians[v_idx].cov[1]);
+//     let c = unpack2x16float(gaussians[v_idx].cov[2]);
+//     return array<f32,6>(a.x, a.y, b.x, b.y, c.x, c.y);
+// }
 
 @compute @workgroup_size(256,1,1)
 fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) wgs: vec3<u32>) {
@@ -203,7 +250,7 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
         return;
     }
 
-    let cov_sparse = cov_coefs(idx);
+    // let cov_sparse = cov_coefs(idx);
 
     let walltime = render_settings.walltime;
     var scale_mod = 0.;
@@ -213,11 +260,16 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     }
 
     let scaling = render_settings.gaussian_scaling * scale_mod;
-    let Vrk = mat3x3<f32>(
-        cov_sparse[0], cov_sparse[1], cov_sparse[2],
-        cov_sparse[1], cov_sparse[3], cov_sparse[4],
-        cov_sparse[2], cov_sparse[4], cov_sparse[5]
-    ) * scaling * scaling;
+    let sr1 = unpack2x16float(vertex.scale_rot[0]);
+    let sr2 = unpack2x16float(vertex.scale_rot[1]);
+    let sr3 = unpack2x16float(vertex.scale_rot[2]);
+    let sr4 = unpack2x16float(vertex.scale_rot[3]);
+
+    let raw_cov = build_cov(
+        vec4<f32>(sr3.x, sr3.y, sr4.x, sr4.y),
+        vec3<f32>(sr1.x, sr1.y, sr2.x),
+    );
+    let Vrk = raw_cov * scaling * scaling;
     let J = mat3x3<f32>(
         focal.x / camspace.z,
         0.,
@@ -274,8 +326,10 @@ fn preprocess(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgr
     let store_idx = atomicAdd(&sort_infos.keys_size, 1u);
     let v = vec4<f32>(v1 / viewport, v2 / viewport);
     points_2d[store_idx] = Splat(
+        build_comat(vec4<f32>(sr3.x, sr3.y, sr4.x, sr4.y), xyz),
+        vec3<f32>(sr1.x, sr1.y, sr2.x),
         pack2x16float(v.xy), pack2x16float(v.zw),
-        pack2x16float(v_center.xy), 
+        pack2x16float(v_center.xy),
         z,
         pack2x16float(color.rg), pack2x16float(color.ba),
     );

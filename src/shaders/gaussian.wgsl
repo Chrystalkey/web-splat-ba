@@ -25,6 +25,10 @@ struct VertexInput {
 };
 
 struct Splat {
+    // this times the camera origin gives the co in adjusted gaussian space
+    co_transform: mat4x4<f32>,
+    // things for the depth calculation
+    scale_vec: vec3<f32>,
      // 4x f16 packed as u32
     v_0: u32, v_1: u32,
     // 2x f16 packed as u32
@@ -86,9 +90,10 @@ fn vs_main(
 
 // origin is the screen coordinate in world space
 // pos is the camera position
+// direction is the normalized ray direction
 fn ray_depth(origin: vec3<f32>, direction: vec3<f32>, scale: vec3<f32>) -> f32 {
     let ror = origin;
-    let dir = normalize(direction);
+    let dir = direction;
     let a = (dir.x * dir.x) / (scale.x * scale.x) + (dir.y * dir.y) / (scale.y * scale.y) + (dir.z * dir.z) / (scale.z * scale.z);
     let b = 2 * (ror.x * dir.x / (scale.x * scale.x) + ror.y * dir.y / (scale.y * scale.y) + ror.z * dir.z / (scale.z * scale.z));
     let c = (ror.x * ror.x) / (scale.x * scale.x) + (ror.y * ror.y) / (scale.y * scale.y) + (ror.z * ror.z) / (scale.z * scale.z) - 1;
@@ -103,12 +108,17 @@ fn ray_depth(origin: vec3<f32>, direction: vec3<f32>, scale: vec3<f32>) -> f32 {
     return t;
 }
 
+// TODO: somehow get the co_transform into the splat struct, accomodate the additional members on the cpu side
 // fn calculate_adjusted_depth(splat: Splat, screen_pos: vec2<f32>) -> f32 {
-//     // get screen pos into world space
-//     let direction = vec3<f32>(screen_pos, 1.)-camera.origin; // TODO: Does not yet exist
-//     // get screen pos into gaussian space
-//     // ???
-//     return ray_depth(vec3<f32>(0., 0., 0.), vec3<f32>(screen_pos, 1.), vec3<f32>(1., 1., 1.));
+//     // get screen pos into world space 
+//     let camera_pos = camera.view_inv[3].xyz; // in world space
+//     let pxl_pos = camera.view_inv * camera.proj_inv * vec4<f32>(screen_pos / camera.viewport, -1., 1.); // in world space
+//     // transform them into adjusted gaussian space
+//     let adj_co = splat.co_transform * camera_pos;
+//     let adj_pxl_pos = splat.co_transform * pxl_pos.xyz;
+//     // calculate the direction & run ray intersection
+//     let direction = normalize(adj_pxl_pos - adj_co);
+//     return ray_depth(adj_co, direction, splat.scale_vec);
 // }
 
 const VARIANCE_K: f32 = 2.;

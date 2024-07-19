@@ -79,25 +79,32 @@ impl<R: io::Read + io::Seek> PlyReader<R> {
         }
 
         let opacity = sigmoid(self.reader.read_f32::<B>()?);
-
         let scale_1 = self.reader.read_f32::<B>()?.exp();
         let scale_2 = self.reader.read_f32::<B>()?.exp();
         let scale_3 = self.reader.read_f32::<B>()?.exp();
-        let scale = Vector3::new(scale_1, scale_2, scale_3);
+        //    let scale = Vector3::new(scale_1, scale_2, scale_3);
 
         let rot_0 = self.reader.read_f32::<B>()?;
         let rot_1 = self.reader.read_f32::<B>()?;
         let rot_2 = self.reader.read_f32::<B>()?;
         let rot_3 = self.reader.read_f32::<B>()?;
-        let rot = Quaternion::new(rot_0, rot_1, rot_2, rot_3).normalize();
-
-        let cov = build_cov(rot, scale);
+        //    let rot = Quaternion::new(rot_0, rot_1, rot_2, rot_3).normalize();
+        //let cov = build_cov(rot, scale);
 
         return Ok((
             Gaussian {
                 xyz: Point3::from(pos).cast().unwrap(),
                 opacity: f16::from_f32(opacity),
-                cov: cov.map(|x| f16::from_f32(x)),
+                scale_rot: [
+                    f16::from_f32(scale_1),
+                    f16::from_f32(scale_2),
+                    f16::from_f32(scale_3),
+                    f16::from_f32(0.),
+                    f16::from_f32(rot_0),
+                    f16::from_f32(rot_1),
+                    f16::from_f32(rot_2),
+                    f16::from_f32(rot_3),
+                ],
             },
             sh.map(|x| x.map(|y| f16::from_f32(y))),
         ));

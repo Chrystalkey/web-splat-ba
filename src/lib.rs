@@ -270,7 +270,6 @@ impl WindowContext {
             display.in_col_tex(),
             display.in_dep_tex(),
             display.in_dbg_tex(),
-            
             size.width,
             size.height,
         );
@@ -300,7 +299,7 @@ impl WindowContext {
                 walltime: Duration::ZERO,
                 scene_center: None,
                 scene_extend: None,
-                ts_parameters: Default::default()
+                ts_parameters: Default::default(),
             },
             pc,
             // camera: view_camera,
@@ -435,7 +434,7 @@ impl WindowContext {
         }
 
         let output = self.surface.get_current_texture()?;
-        
+
         let view_rgb = output.texture.create_view(&wgpu::TextureViewDescriptor {
             format: Some(self.config.format.remove_srgb_suffix()),
             ..Default::default()
@@ -488,7 +487,7 @@ impl WindowContext {
                 &self.wgpu_context.device,
                 self.display.in_col_tex(),
                 self.display.in_dep_tex(),
-                self.display.in_dbg_tex()
+                self.display.in_dbg_tex(),
             );
 
             let grp_out = self.temp_smoother.input_textures();
@@ -539,7 +538,8 @@ impl WindowContext {
                 ..Default::default()
             });
 
-            self.renderer.render(&mut render_pass, &self.pc);
+            self.renderer
+                .render(&mut render_pass, &self.pc, self.renderer.camera());
         }
         if let Some(stopwatch) = &mut self.stopwatch {
             stopwatch.stop(&mut encoder, "rasterization").unwrap();

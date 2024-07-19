@@ -188,6 +188,7 @@ pub fn sh_deg_from_num_coefs(n: u32) -> Option<u32> {
     return Some((sqrt as u32) - 1);
 }
 
+#[allow(unused)]
 /// builds a covariance matrix based on a quaterion and rotation
 /// the matrix is symmetric so we only return the upper right half
 /// see "3D Gaussian Splatting" Kerbel et al.

@@ -1,6 +1,6 @@
 use bytemuck::Zeroable;
 use cgmath::{
-    BaseNum, ElementWise, EuclideanSpace, MetricSpace, Point3, Vector2, Vector3, Vector4,
+    BaseNum, ElementWise, EuclideanSpace, Matrix4, MetricSpace, Point3, Vector2, Vector3, Vector4,
 };
 use half::f16;
 use num_traits::Float;
@@ -38,7 +38,7 @@ impl Default for Gaussian {
 pub struct Gaussian {
     pub xyz: Point3<f16>,
     pub opacity: f16,
-    pub cov: [f16; 6],
+    pub scale_rot: [f16; 8],
 }
 
 #[repr(C)]
@@ -335,6 +335,8 @@ impl PointCloud {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Splat {
+    pub co_transform: Matrix4<f32>, // camera origin transformation
+    pub scale_vec: Vector3<f32>,    // scale factors from the original gaussian in the cardinal axes
     pub v: Vector4<f16>,
     pub pos: Vector2<f16>,
     pub depth: f32,

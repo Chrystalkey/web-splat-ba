@@ -23,8 +23,8 @@ impl PerspectiveCamera {
         }
     }
 
+    /// Set Near and Far plane for the camera
     pub fn fit_near_far(&mut self, aabb: &Aabb<f32>) {
-        // set camera near and far plane
         let center = aabb.center();
         let radius = aabb.radius();
         let distance = self.position.distance(center);

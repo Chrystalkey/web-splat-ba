@@ -43,6 +43,7 @@ impl GaussianRenderer {
             bind_group_layouts: &[
                 &PointCloud::bind_group_layout_render(device), // Needed for points_2d (on binding 2)
                 &GPURSSorter::bind_group_layout_rendering(device), // Needed for indices   (on binding 4)
+                &UniformBuffer::<CameraUniform>::bind_group_layout(device), // Needed for camera    (on binding 0)
             ],
             push_constant_ranges: &[],
         });
@@ -66,7 +67,7 @@ impl GaussianRenderer {
                         blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     }),
-                    // this is the statistics output 
+                    // this is the statistics output
                     Some(wgpu::ColorTargetState {
                         format: GRPTextures::DEPTH_FORMAT,
                         blend: Some(wgpu::BlendState {
@@ -274,9 +275,11 @@ impl GaussianRenderer {
         &'rpass self,
         render_pass: &mut wgpu::RenderPass<'rpass>,
         pc: &'rpass PointCloud,
+        camera_uniform: &'rpass UniformBuffer<CameraUniform>,
     ) {
         render_pass.set_bind_group(0, pc.render_bind_group(), &[]);
         render_pass.set_bind_group(1, &self.sorter_suff.as_ref().unwrap().sorter_render_bg, &[]);
+        render_pass.set_bind_group(2, camera_uniform.bind_group(), &[]);
         render_pass.set_pipeline(&self.pipeline);
 
         render_pass.draw_indirect(&self.draw_indirect_buffer, 0);
@@ -1383,7 +1386,7 @@ impl Default for SplattingArgsUniform {
             scene_center: Vector4::new(0., 0., 0., 0.),
             scene_extend: 1.,
             ts_parameters: TSParameters::default(),
-            _padding: 0.
+            _padding: 0.,
         }
     }
 }
