@@ -190,11 +190,11 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
 
     let depth_raw = textureSampleLevel(currentFrameDepthTexture, filter_sampler, current_normalized_position, 0.);
     // premult alpha blending
-    // let current_depth = depth_raw.r / depth_raw.g; // premultiplied alpha
+    let current_depth = depth_raw.r / depth_raw.g; // premultiplied alpha
     // opaque objects
     //let current_depth = depth_raw.r;
     // mean +sd
-    let current_depth = current_depth_stats.x - sqrt(current_depth_stats.y);
+    // let current_depth = current_depth_stats.x - sqrt(current_depth_stats.y);
     // end of depth calculation
 
     // ndc
@@ -223,7 +223,7 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
             depth_raw.g, current_depth_variance
         );
     }
-    output.debug = vec4<f32>(vec3(current_depth / 50.), 1.);
+    output.debug = vec4<f32>(vec3(current_depth), 1.);
     // output.debug = vec4<f32>(normvec(current_normalized_position, depth_raw.g), 1.); // normal vector debug
     // final_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance)* 100), 1.);      // depth variance 
     // final_colour = vec4<f32>(vec3<f32>(current_depth_mean/100.), 1.);                // depth mean value

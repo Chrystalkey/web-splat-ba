@@ -16,6 +16,7 @@ struct VertexOutput {
     @location(0) screen_pos: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) depth: f32,
+    @location(3) splat_index: u32,
 };
 
 struct VertexInput {
@@ -49,6 +50,8 @@ struct FragmentOut {
 var<storage, read> points_2d : array<Splat>;
 @group(1) @binding(4)
 var<storage, read> indices : array<u32>;
+@group(2) @binding(0)
+var<uniform> camera : CameraUniforms;
 
 // @group(2) @binding(0) var<uniform> camera: CameraUniforms;
 
@@ -85,10 +88,11 @@ fn vs_main(
     out.screen_pos = position;
     out.color = vec4<f32>(unpack2x16float(vertex.color_0), unpack2x16float(vertex.color_1));
     out.depth = vertex.depth;
+    out.splat_index = in_instance_index;
     return out;
 }
 
-// origin is the screen coordinate in world space
+// origin is the camera origin coordinate in world space
 // pos is the camera position
 // direction is the normalized ray direction
 fn ray_depth(origin: vec3<f32>, direction: vec3<f32>, scale: vec3<f32>) -> f32 {
@@ -109,17 +113,17 @@ fn ray_depth(origin: vec3<f32>, direction: vec3<f32>, scale: vec3<f32>) -> f32 {
 }
 
 // TODO: somehow get the co_transform into the splat struct, accomodate the additional members on the cpu side
-// fn calculate_adjusted_depth(splat: Splat, screen_pos: vec2<f32>) -> f32 {
-//     // get screen pos into world space 
-//     let camera_pos = camera.view_inv[3].xyz; // in world space
-//     let pxl_pos = camera.view_inv * camera.proj_inv * vec4<f32>(screen_pos / camera.viewport, -1., 1.); // in world space
-//     // transform them into adjusted gaussian space
-//     let adj_co = splat.co_transform * camera_pos;
-//     let adj_pxl_pos = splat.co_transform * pxl_pos.xyz;
-//     // calculate the direction & run ray intersection
-//     let direction = normalize(adj_pxl_pos - adj_co);
-//     return ray_depth(adj_co, direction, splat.scale_vec);
-// }
+fn calculate_adjusted_depth(splat: Splat, screen_pos: vec2<f32>) -> f32 {
+    // get screen pos into world space 
+    let camera_pos = vec4<f32>(camera.view_inv[3].xyz, 1.); // in world space
+    let pxl_pos = camera.view_inv * camera.proj_inv * vec4<f32>(screen_pos / camera.viewport, -1., 1.); // in world space
+    // transform them into adjusted gaussian space
+    let adj_co = splat.co_transform * camera_pos;
+    let adj_pxl_pos = splat.co_transform * vec4<f32>(pxl_pos.xyz, 1.);
+    // calculate the direction & run ray intersection
+    let direction = normalize(adj_pxl_pos - adj_co);
+    return ray_depth(adj_co.xyz, direction.xyz, splat.scale_vec);
+}
 
 const VARIANCE_K: f32 = 2.;
 // TODO: Depth Calculation Experiments
@@ -144,6 +148,7 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     // g is total sum of depth
     // b is sum of squares
     // a is sum of alphas, currently unused
+    let elipsis_depth = calculate_adjusted_depth(points_2d[indices[in.splat_index] + 0u], in.screen_pos);
     let depth_adjusted = in.depth - VARIANCE_K;
     let depth_stat_return = vec4<f32>(
         1.,
@@ -154,16 +159,16 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
 
     // premultiplied alphablending
     let depth_return = vec4<f32>(
-        in.depth*b,
+        elipsis_depth * b,
         b,
         0.,
         b
     );
     // opaque objects
     let depth_return_opq = vec4<f32>(
-        in.depth, 
-        b, 
-        0., 
+        in.depth,
+        b,
+        0.,
         1.
     );
 
