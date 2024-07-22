@@ -99,14 +99,14 @@ fn ray_depth(origin: vec3<f32>, direction: vec3<f32>, scale: vec3<f32>) -> f32 {
     let ror = origin;
     let dir = direction;
     let a = (dir.x * dir.x) / (scale.x * scale.x) + (dir.y * dir.y) / (scale.y * scale.y) + (dir.z * dir.z) / (scale.z * scale.z);
-    let b = 2 * (ror.x * dir.x / (scale.x * scale.x) + ror.y * dir.y / (scale.y * scale.y) + ror.z * dir.z / (scale.z * scale.z));
+    let b = 2. * (ror.x * dir.x / (scale.x * scale.x) + ror.y * dir.y / (scale.y * scale.y) + ror.z * dir.z / (scale.z * scale.z));
     let c = (ror.x * ror.x) / (scale.x * scale.x) + (ror.y * ror.y) / (scale.y * scale.y) + (ror.z * ror.z) / (scale.z * scale.z) - 1;
 
     let disc = b * b-4 * a * c;
     if disc < 0. {
         return 0.;
     }
-    let t = (-b * 0.5 / a);
+    let t = (b / a * -0.5);
     let p_mid = ror + t * dir;
 
     return t;
@@ -116,7 +116,7 @@ fn ray_depth(origin: vec3<f32>, direction: vec3<f32>, scale: vec3<f32>) -> f32 {
 fn calculate_adjusted_depth(splat: Splat, screen_pos: vec2<f32>) -> f32 {
     // get screen pos into world space 
     let camera_pos = vec4<f32>(camera.view_inv[3].xyz, 1.); // in world space
-    let pxl_pos = camera.view_inv * camera.proj_inv * vec4<f32>(screen_pos / camera.viewport, -1., 1.); // in world space
+    let pxl_pos = camera.view_inv * camera.proj_inv * vec4<f32>(screen_pos, -1., 1.); // in world space
     // transform them into adjusted gaussian space
     let adj_co = splat.co_transform * camera_pos;
     let adj_pxl_pos = splat.co_transform * vec4<f32>(pxl_pos.xyz, 1.);
@@ -149,7 +149,8 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     // b is sum of squares
     // a is sum of alphas, currently unused
     let elipsis_depth = calculate_adjusted_depth(points_2d[indices[in.splat_index] + 0u], in.screen_pos);
-    let depth_adjusted = in.depth - VARIANCE_K;
+    let depth = elipsis_depth; // in.depth
+    let depth_adjusted = depth - VARIANCE_K;
     let depth_stat_return = vec4<f32>(
         1.,
         depth_adjusted,
@@ -159,14 +160,14 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
 
     // premultiplied alphablending
     let depth_return = vec4<f32>(
-        elipsis_depth * b,
+        depth * b,
         b,
-        0.,
+        in.depth * b,
         b
     );
     // opaque objects
     let depth_return_opq = vec4<f32>(
-        in.depth,
+        depth,
         b,
         0.,
         1.

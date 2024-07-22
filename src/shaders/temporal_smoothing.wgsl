@@ -170,7 +170,7 @@ fn depth_stats(raw_depth: vec4<f32>) -> vec4<f32> {
     let adj_mean = sum / n;
     let mean = adj_mean + (n * VARIANCE_K);
     let variance = (ssum - (sum * sum) / n) / n_min_1;
-    //let variance = ((ssum / n) - (sum / n) * (sum / n)) * (n / (n_min_1));
+    // let variance = ((ssum / n) - (sum / n) * (sum / n)) * (n / (n_min_1));
     // ((12*12)/n-(12/n*12/n))*(1/1);
     return vec4<f32>(mean, variance, 0., 0.);
 }
@@ -223,7 +223,9 @@ fn smooth_out_at(pixel_coordinate: vec2u) {
             depth_raw.g, current_depth_variance
         );
     }
-    output.debug = vec4<f32>(vec3(current_depth), 1.);
+    output.debug = vec4<f32>(vec3(current_depth_mean/ 10.), 1.);
+    let depth_diff = abs(depth_raw.z/depth_raw.y - current_depth);
+    output.debug = vec4<f32>(vec3(depth_diff * 0.1), 1.);
     // output.debug = vec4<f32>(normvec(current_normalized_position, depth_raw.g), 1.); // normal vector debug
     // final_colour = vec4<f32>(vec3<f32>(sqrt(current_depth_variance)* 100), 1.);      // depth variance 
     // final_colour = vec4<f32>(vec3<f32>(current_depth_mean/100.), 1.);                // depth mean value
