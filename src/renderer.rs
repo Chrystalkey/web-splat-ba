@@ -146,7 +146,7 @@ impl GaussianRenderer {
         }
     }
 
-    pub(crate) fn camera(&self) -> &UniformBuffer<CameraUniform> {
+    pub fn camera(&self) -> &UniformBuffer<CameraUniform> {
         &self.camera
     }
 

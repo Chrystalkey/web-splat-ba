@@ -149,7 +149,7 @@ fn fs_main(in: VertexOutput) -> FragmentOut {
     // b is sum of squares
     // a is sum of alphas, currently unused
     let elipsis_depth = calculate_adjusted_depth(points_2d[indices[in.splat_index] + 0u], in.screen_pos);
-    let depth = elipsis_depth; // in.depth
+    let depth = in.depth; // elipsis_depth;
     let depth_adjusted = depth - VARIANCE_K;
     let depth_stat_return = vec4<f32>(
         1.,

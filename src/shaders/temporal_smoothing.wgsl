@@ -122,29 +122,29 @@ fn blend(c_col: vec4<f32>, c_depth: f32,
     surface_normal: vec3<f32>,
     alpha: f32,
     depth_variance: f32) -> DCO {
-    let depth_diff = abs(a_depth - c_depth);
-
-    let colour_diff = colour_difference(c_col.rgb, a_col.rgb);
-    //return vec4<f32>(depth_diff*100., colour_diff, 0., 1.); // cool effect, though
-    let normal_diff = acos(dot(surface_normal, vec3<f32>(0., 0., 1.))) / 2 * PI; // value range from 0 to 2 * PI
-
-
+    let ts_p = render_settings.ts_parameters;
     var colour = c_col;
     var debug = BLACK;
-    let ts_p = render_settings.ts_parameters;
-    
-    // let dd_coeff = 1. - smoothstep(ts_p.depth_diff_thresholds.x, ts_p.depth_diff_thresholds.y, depth_diff);
-    // let cd_coeff = smoothstep(ts_p.colour_diff_thresholds.x, ts_p.colour_diff_thresholds.y, colour_diff);
-    // let vr_coeff = smoothstep(0.0030, 0.0035, sqrt(depth_variance));
+
+    let depth_diff = abs(a_depth - c_depth);
+    let dd_coeff = 1. - smoothstep(ts_p.depth_diff_thresholds.x, ts_p.depth_diff_thresholds.y, depth_diff);
+
+    let colour_diff = colour_difference(c_col.rgb, a_col.rgb);
+    let cd_coeff = smoothstep(ts_p.colour_diff_thresholds.x, ts_p.colour_diff_thresholds.y, colour_diff);
+
+    // let normal_diff = acos(dot(surface_normal, vec3<f32>(0., 0., 1.))) / 2 * PI; // value range from 0 to 2 * PI
     // let nm_coeff = 1. - smoothstep(ts_p.normal_diff_thresholds.x, ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
+    
+    let vr_coeff = smoothstep(0.0030, 0.0035, sqrt(depth_variance));
 
-    let dd_coeff = 1. - step(ts_p.depth_diff_thresholds.y, depth_diff);
-    let cd_coeff = step(ts_p.colour_diff_thresholds.y, colour_diff);
-    let vr_coeff = step(0.0035, sqrt(depth_variance));
-    let nm_coeff = 1. - step(ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
+    // "naive" meaning just-step implementation
+    // let dd_coeff = 1. - step(ts_p.depth_diff_thresholds.y, depth_diff);
+    // let cd_coeff = step(ts_p.colour_diff_thresholds.y, colour_diff);
+    // let vr_coeff = step(0.0035, sqrt(depth_variance));
+    // let nm_coeff = 1. - step(ts_p.normal_diff_thresholds.y, normal_diff); // TODO: find a useful threshold
 
-    let mix_coeff = (dd_coeff * cd_coeff) * nm_coeff;
-
+    // let mix_coeff = (dd_coeff * cd_coeff) * nm_coeff;
+    let mix_coeff = dd_coeff * cd_coeff;
 
     let mix_col = mix(a_col, c_col, ts_p.current_frame_weight);
     colour = mix(c_col, mix_col, mix_coeff);

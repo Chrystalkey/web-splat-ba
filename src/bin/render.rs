@@ -120,7 +120,7 @@ async fn render_views(
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            renderer.render(&mut render_pass, &pc);
+            renderer.render(&mut render_pass, &pc, renderer.camera());
         }
         queue.submit(std::iter::once(encoder.finish()));
         let img = download_texture(&target, device, queue).await;
