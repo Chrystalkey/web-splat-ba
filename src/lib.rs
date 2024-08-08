@@ -1,3 +1,9 @@
+use image::Pixel;
+#[cfg(target_arch = "wasm32")]
+use instant::{Duration, Instant};
+use renderer::Display;
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::{Duration, Instant};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -5,13 +11,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
-
-use image::Pixel;
-#[cfg(target_arch = "wasm32")]
-use instant::{Duration, Instant};
-use renderer::Display;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::{Duration, Instant};
+use std::{io::Write, sync::mpsc::Sender};
 use wgpu::{util::DeviceExt, Backends, Extent3d};
 
 use cgmath::{Deg, EuclideanSpace, Point3, Quaternion, UlpsEq, Vector2, Vector3};
@@ -70,6 +70,11 @@ pub struct RenderConfig {
     pub no_vsync: bool,
     pub skybox: Option<PathBuf>,
     pub hdr: bool,
+    pub perftest: Option<u32>,
+    pub ui_enabled: bool,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub timing_output: Option<PathBuf>,
 }
 
 pub struct WGPUContext {
@@ -184,10 +189,20 @@ impl WindowContext {
         pc_file: R,
         render_config: &RenderConfig,
     ) -> anyhow::Result<Self> {
-        let mut size = window.inner_size();
-        if size == PhysicalSize::new(0, 0) {
-            size = PhysicalSize::new(800, 600);
-        }
+        let size = {
+            let inner_sz = window.inner_size();
+            if inner_sz == PhysicalSize::new(0, 0) {
+                PhysicalSize::new(
+                    render_config.width.unwrap_or(800),
+                    render_config.height.unwrap_or(600),
+                )
+            } else {
+                PhysicalSize::new(
+                    render_config.width.unwrap_or(inner_sz.width),
+                    render_config.height.unwrap_or(inner_sz.height),
+                )
+            }
+        };
 
         let window = Arc::new(window);
 
@@ -308,7 +323,7 @@ impl WindowContext {
             fps: 0.,
             #[cfg(not(target_arch = "wasm32"))]
             history: RingBuffer::new(512),
-            ui_visible: true,
+            ui_visible: render_config.ui_enabled,
             display,
             temp_smoother,
             background_color: Color32::BLACK,
@@ -426,8 +441,12 @@ impl WindowContext {
         self.splatting_args.camera.fit_near_far(aabb);
     }
 
-    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    fn render(
+        &mut self,
+        tx: Option<Sender<Option<(Duration, Duration, Duration, Duration, Duration)>>>,
+    ) -> Result<(), wgpu::SurfaceError> {
         self.stopwatch.as_mut().map(|s| s.reset());
+        let now = Instant::now();
         let window_size = self.window.inner_size();
         if window_size.width != self.config.width || window_size.height != self.config.height {
             self.resize(window_size, None);
@@ -592,6 +611,32 @@ impl WindowContext {
         }
 
         output.present();
+        let full_time = Instant::now() - now;
+        if let Some(tx) = tx {
+            if let Some(stopwatch) = self.stopwatch.as_mut() {
+                let durations = pollster::block_on(
+                    stopwatch
+                        .take_measurements(&self.wgpu_context.device, &self.wgpu_context.queue),
+                );
+                tx.send(Some((
+                    *durations.get("preprocess").unwrap_or(&Duration::ZERO),
+                    *durations.get("sorting").unwrap_or(&Duration::ZERO),
+                    *durations.get("rasterization").unwrap_or(&Duration::ZERO),
+                    *durations.get("smoothing").unwrap_or(&Duration::ZERO),
+                    Duration::from_secs_f32(1. / self.fps),
+                )))
+                .unwrap();
+            } else {
+                tx.send(Some((
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    full_time,
+                )))
+                .unwrap();
+            }
+        }
         Ok(())
     }
 
@@ -763,12 +808,20 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
     let window_size = if let Some(scene) = &scene {
         let camera = scene.camera(0).unwrap();
         let factor = 1200. / camera.width as f32;
-        PhysicalSize::new(
+        let inner_sz = PhysicalSize::new(
             (camera.width as f32 * factor) as u32,
             (camera.height as f32 * factor) as u32,
-        )
+        );
+        if inner_sz == PhysicalSize::new(0, 0) {
+            PhysicalSize::new(config.width.unwrap_or(800), config.height.unwrap_or(600))
+        } else {
+            PhysicalSize::new(
+                config.width.unwrap_or(inner_sz.width),
+                config.height.unwrap_or(inner_sz.height),
+            )
+        }
     } else {
-        PhysicalSize::new(800, 600)
+        PhysicalSize::new(config.width.unwrap_or(800), config.height.unwrap_or(600))
     };
 
     let window = WindowBuilder::new()
@@ -831,6 +884,72 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
 
     let mut last = Instant::now();
 
+    if let Some(perftest_frames) = config.perftest {
+        let (thr, tx) = if let Some(timing_output) = config.timing_output {
+            let (tx, rx) = std::sync::mpsc::channel::<
+                Option<(Duration, Duration, Duration, Duration, Duration)>,
+            >();
+            let thr = std::thread::spawn(move || {
+                let mut file = std::fs::File::create(timing_output).unwrap();
+                let _ = writeln!(file, "pre;sort;rast;smooth;total");
+                // one some for if the recv() returned something, one Some() for wether Some() was sent
+                while let Some(Some((pre, sort, rast, smooth, total))) = rx.recv().ok() {
+                    writeln!(
+                        file,
+                        "{};{};{};{};{}",
+                        pre.as_secs_f64(),
+                        sort.as_secs_f64(),
+                        rast.as_secs_f64(),
+                        smooth.as_secs_f64(),
+                        total.as_secs_f64()
+                    )
+                    .unwrap();
+                }
+                file.flush().unwrap();
+            });
+            (Some(thr), Some(tx))
+        } else {
+            (None, None)
+        };
+        let tx_render = tx.clone();
+        log::info!("Entering Performance Testing Render Loop. Rendering {perftest_frames} frames");
+        let mut frames_rendered = 0;
+        event_loop
+            .run(move |_, target| {
+                if frames_rendered < perftest_frames {
+                    log::info!("Rendering Frame {frames_rendered}");
+                    if state.animation.is_none() {
+                        state.start_tracking_shot();
+                    }
+                    let now = Instant::now();
+                    let dt = now - last;
+                    last = now;
+                    state.update(dt);
+
+                    match state.render(tx_render.clone()) {
+                        Ok(_) => {}
+                        // Reconfigure the surface if lost
+                        Err(wgpu::SurfaceError::Lost) => {
+                            state.resize(state.window.inner_size(), None)
+                        }
+                        // The system is out of memory, we should probably quit
+                        Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
+                        // All other errors (Outdated, Timeout) should be resolved by the next frame
+                        Err(e) => println!("error: {:?}", e),
+                    }
+                    frames_rendered += 1;
+                } else {
+                    log::info!("Exiting Application");
+                    target.exit();
+                }
+            })
+            .unwrap();
+        if let Some(tx) = tx {
+            tx.send(None).unwrap();
+            thr.unwrap().join().unwrap();
+        }
+        return;
+    }
     event_loop.run(move |event, target|
 
         match event {
@@ -918,7 +1037,7 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
                     last = now;
                     state.update(dt);
 
-                    match state.render() {
+                    match state.render(None) {
                         Ok(_) => {}
                         // Reconfigure the surface if lost
                         Err(wgpu::SurfaceError::Lost) => state.resize(state.window.inner_size(), None),
@@ -943,7 +1062,8 @@ pub async fn open_window<R: Read + Seek + Send + Sync + 'static>(
                 state.window.request_redraw();
             }
             _ => {}
-        }).unwrap();
+        }
+    ).unwrap();
 }
 
 #[cfg(target_arch = "wasm32")]

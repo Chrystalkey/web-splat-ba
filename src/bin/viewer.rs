@@ -16,6 +16,24 @@ struct Opt {
     #[arg(long, default_value_t = false)]
     no_vsync: bool,
 
+    /// Enter Performance test mode for <N> frames, then exit
+    #[arg(long)]
+    perftest: Option<u32>,
+
+    /// Output timing information to file
+    #[arg(long)]
+    timing_output : Option<PathBuf>,
+
+    /// Disables UI. Reenable by pressing 'u'
+    #[arg(long, short, default_value_t = false)]
+    no_ui: bool,
+    /// Initial window width
+    #[arg(long)]
+    width: Option<u32>,
+    /// Initial window height
+    #[arg(long)]
+    height: Option<u32>,
+
     /// Support HDR rendering
     #[arg(long, default_value_t = false)]
     hdr: bool,
@@ -35,7 +53,7 @@ fn try_find_scene_file(input: &PathBuf, depth: u32) -> Option<PathBuf> {
         }
         if depth == 0 {
             return None;
-        }   
+        }
         return try_find_scene_file(&parent.to_path_buf(), depth - 1);
     }
     return None;
@@ -57,7 +75,14 @@ async fn main() {
     if opt.no_vsync {
         log::info!("V-sync disabled");
     }
-
+    if opt.no_ui {
+        log::info!("UI disabled");
+    }
+    if let Some(ptest) = opt.perftest {
+        log::info!("Performance test for {} frames", ptest);
+    } else {
+        log::info!("Performance Testing disabled, normal rendering");
+    }
     open_window(
         data_file,
         scene_file,
@@ -65,6 +90,11 @@ async fn main() {
             no_vsync: opt.no_vsync,
             skybox: opt.skybox,
             hdr: opt.hdr,
+            perftest: opt.perftest,
+            ui_enabled: opt.perftest.is_none() && !opt.no_ui,
+            width: opt.width,
+            height: opt.height,
+            timing_output: opt.timing_output,
         },
         Some(opt.input),
         opt.scene,
@@ -72,4 +102,6 @@ async fn main() {
     .await;
 }
 #[cfg(target_arch = "wasm32")]
-fn main(){todo!("not implemented")}
+fn main() {
+    todo!("not implemented")
+}
